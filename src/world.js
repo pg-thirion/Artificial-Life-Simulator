@@ -968,6 +968,7 @@ export class World {
       mutationMultiplier: this.mutationMultiplier,
       isNight: this.isNight,
       solarIntensity: this.solarIntensity,
+      getBiomeAt: (x, y) => this.getBiomeAt(x, y),
       addPheromone: (x, y, t, s, d) => this.addPheromone(x, y, t, s, d),
       addFloatingText: (x, y, txt, col) => this.addFloatingText(x, y, txt, col)
     };

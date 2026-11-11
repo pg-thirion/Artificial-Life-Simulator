@@ -4,7 +4,7 @@
  * Reynolds autonomous steering behaviors, and expressive 2D blob morphology.
  */
 
-import { Vector2D, randomFloat, randomGaussian, clamp, lerp } from './math.js';
+import { Vector2D, randomFloat, randomGaussian, clamp, lerp, normalizeAngle } from './math.js';
 import { Genome } from './genome.js';
 import { NeuralBrain } from './neuralBrain.js';
 
@@ -82,6 +82,10 @@ export class Creature {
     this.isHighlighted = false;
     this.isPossessed = false;
     this.playerInputVector = new Vector2D(0, 0);
+
+    // Neural sensory and motor telemetry
+    this.lastNeuralInputs = null;
+    this.lastNeuralOutputs = null;
   }
 
   /**
@@ -245,6 +249,231 @@ export class Creature {
   }
 
   /**
+   * Evaluates the 10-input normalized sensory pipeline and actuates neural motor impulses.
+   * Inputs (all finite, normalized):
+   *  0: nearestFoodDistNorm [0, 1]
+   *  1: nearestFoodAngleNorm [-1, 1]
+   *  2: nearestFoodDangerSignal [0, 1]
+   *  3: nearestThreatDistNorm [0, 1]
+   *  4: nearestThreatAngleNorm [-1, 1]
+   *  5: nearestMateDistNorm [0, 1]
+   *  6: nearestMateAngleNorm [-1, 1]
+   *  7: energyRatio [0, 1]
+   *  8: biomeDragStress [0, 1]
+   *  9: solarIntensity [0, 1]
+   *
+   * @param {Object} [env={}] Environmental perception context
+   * @returns {{steerAngleDelta: number, thrustMagnitude: number, courtshipDesire: number, aggressionImpulse: number, inputs: Float32Array, outputs: Float32Array}}
+   */
+  evaluateNeuralBehavior(env = {}) {
+    const safeEnv = env || {};
+
+    // Circadian nocturnal perception scaling
+    let effectiveSense = this.genome.sense;
+    if (safeEnv.isNight) {
+      if ((this.genome.nocturnal ?? 0.2) >= 0.5) {
+        effectiveSense *= 1.25;
+      } else {
+        effectiveSense *= 0.82;
+      }
+    }
+    const sense = Math.max(1.0, effectiveSense);
+
+    // 1. Scan for Food Pellets & Living Prey
+    let closestFoodEntity = null;
+    let closestFoodDist = Infinity;
+    let closestFoodIsPrey = false;
+
+    if (safeEnv.foodGrid) {
+      const prefersMeat = this.genome.diet > 0.55;
+      const prefersPlants = this.genome.diet < 0.45;
+      const nearestPellet = safeEnv.foodGrid.queryNearest(this.position.x, this.position.y, sense, (food) => {
+        if (food.isRotten) return false;
+        if (prefersMeat) return food.type === 'meat';
+        if (prefersPlants) return food.type === 'plant';
+        return true;
+      });
+      if (nearestPellet) {
+        closestFoodEntity = nearestPellet.entity;
+        closestFoodDist = nearestPellet.distance;
+        closestFoodIsPrey = false;
+      }
+    }
+
+    if (this.genome.diet >= 0.42 && safeEnv.creatureGrid) {
+      const preyCandidates = safeEnv.creatureGrid.queryRadius(this.position.x, this.position.y, sense, (c) => {
+        if (c === this || !c.isAlive) return false;
+        const camo = c.genome?.camouflage ?? 0.25;
+        const d = this.position.dist(c.position);
+        const maxDetectDist = sense * (1.0 - camo * 0.60);
+        return d <= maxDetectDist &&
+          (this.genome.size > c.genome.size * 1.08) &&
+          (c.genome.diet < this.genome.diet) &&
+          (this.genome.geneticDistance(c.genome) > 0.16);
+      });
+      for (let i = 0; i < preyCandidates.length; i++) {
+        const p = preyCandidates[i];
+        const d = this.position.dist(p.position);
+        if (d < closestFoodDist) {
+          closestFoodDist = d;
+          closestFoodEntity = p;
+          closestFoodIsPrey = true;
+        }
+      }
+    }
+
+    let nearestFoodDistNorm = 0.0;
+    let nearestFoodAngleNorm = 0.0;
+    let nearestFoodDangerSignal = 0.0;
+
+    if (closestFoodEntity && Number.isFinite(closestFoodDist)) {
+      nearestFoodDistNorm = 1.0 - clamp(closestFoodDist / sense, 0.0, 1.0);
+      const targetPos = closestFoodEntity.position;
+      const angleToTarget = Math.atan2(targetPos.y - this.position.y, targetPos.x - this.position.x);
+      const angleDelta = normalizeAngle(angleToTarget - this.heading);
+      nearestFoodAngleNorm = clamp(angleDelta / Math.PI, -1.0, 1.0);
+      if (closestFoodIsPrey) {
+        nearestFoodDangerSignal = clamp(closestFoodEntity.aposematicWarningLevel ?? closestFoodEntity.genome?.armor ?? 0.0, 0.0, 1.0);
+      } else {
+        nearestFoodDangerSignal = 0.0;
+      }
+    }
+
+    // 2. Scan for Predatory Threats
+    let closestThreat = null;
+    let closestThreatDist = Infinity;
+
+    if (safeEnv.creatureGrid) {
+      const threatCandidates = safeEnv.creatureGrid.queryRadius(this.position.x, this.position.y, sense, (c) => {
+        return c !== this && c.isAlive && c.genome?.diet > 0.45 && c.genome?.size > this.genome.size * 1.12;
+      });
+      for (let i = 0; i < threatCandidates.length; i++) {
+        const t = threatCandidates[i];
+        const d = this.position.dist(t.position);
+        if (d <= sense && (d < closestThreatDist || (Math.abs(d - closestThreatDist) < 1e-4 && t.genome.size > closestThreat.genome.size))) {
+          closestThreatDist = d;
+          closestThreat = t;
+        }
+      }
+    }
+
+    let nearestThreatDistNorm = 0.0;
+    let nearestThreatAngleNorm = 0.0;
+
+    if (closestThreat && Number.isFinite(closestThreatDist)) {
+      nearestThreatDistNorm = 1.0 - clamp(closestThreatDist / sense, 0.0, 1.0);
+      const angleToThreat = Math.atan2(closestThreat.position.y - this.position.y, closestThreat.position.x - this.position.x);
+      const angleDelta = normalizeAngle(angleToThreat - this.heading);
+      nearestThreatAngleNorm = clamp(angleDelta / Math.PI, -1.0, 1.0);
+    }
+
+    // 3. Scan for Potential Mates (compatible species)
+    let closestMate = null;
+    let closestMateDist = Infinity;
+
+    if (safeEnv.creatureGrid) {
+      const mateCandidates = safeEnv.creatureGrid.queryRadius(this.position.x, this.position.y, sense, (c) => {
+        return c !== this && c.isAlive && this.genome.geneticDistance(c.genome) <= 0.40;
+      });
+      for (let i = 0; i < mateCandidates.length; i++) {
+        const m = mateCandidates[i];
+        const d = this.position.dist(m.position);
+        if (d <= sense && d < closestMateDist) {
+          closestMateDist = d;
+          closestMate = m;
+        }
+      }
+    }
+
+    let nearestMateDistNorm = 0.0;
+    let nearestMateAngleNorm = 0.0;
+
+    if (closestMate && Number.isFinite(closestMateDist)) {
+      nearestMateDistNorm = 1.0 - clamp(closestMateDist / sense, 0.0, 1.0);
+      const angleToMate = Math.atan2(closestMate.position.y - this.position.y, closestMate.position.x - this.position.x);
+      const angleDelta = normalizeAngle(angleToMate - this.heading);
+      nearestMateAngleNorm = clamp(angleDelta / Math.PI, -1.0, 1.0);
+    }
+
+    // 4. Internal Metabolic State
+    const energyRatio = (this.maxEnergy > 0 && Number.isFinite(this.energy))
+      ? clamp(this.energy / this.maxEnergy, 0.0, 1.0)
+      : 0.0;
+
+    // 5. Environmental Factors: Drag & Solar Intensity
+    let biomeDragStress = 0.0;
+    if (typeof safeEnv.drag === 'number') {
+      biomeDragStress = safeEnv.drag;
+    } else if (typeof safeEnv.biomeDrag === 'number') {
+      biomeDragStress = safeEnv.biomeDrag;
+    } else if (typeof safeEnv.getBiomeAt === 'function') {
+      const biome = safeEnv.getBiomeAt(this.position.x, this.position.y);
+      if (biome && typeof biome.drag === 'number') {
+        biomeDragStress = biome.drag;
+      }
+    }
+    biomeDragStress = clamp(Number.isFinite(biomeDragStress) ? biomeDragStress : 0.0, 0.0, 1.0);
+
+    let solarIntensity = 0.9;
+    if (typeof safeEnv.solarIntensity === 'number') {
+      solarIntensity = safeEnv.solarIntensity;
+    } else if (safeEnv.isNight !== undefined) {
+      solarIntensity = safeEnv.isNight ? 0.15 : 0.9;
+    }
+    solarIntensity = clamp(Number.isFinite(solarIntensity) ? solarIntensity : 0.9, 0.0, 1.0);
+
+    // Guard all 10 features into Float32Array(10)
+    const inputs = new Float32Array(10);
+    inputs[0] = clamp(Number.isFinite(nearestFoodDistNorm) ? nearestFoodDistNorm : 0, 0, 1);
+    inputs[1] = clamp(Number.isFinite(nearestFoodAngleNorm) ? nearestFoodAngleNorm : 0, -1, 1);
+    inputs[2] = clamp(Number.isFinite(nearestFoodDangerSignal) ? nearestFoodDangerSignal : 0, 0, 1);
+    inputs[3] = clamp(Number.isFinite(nearestThreatDistNorm) ? nearestThreatDistNorm : 0, 0, 1);
+    inputs[4] = clamp(Number.isFinite(nearestThreatAngleNorm) ? nearestThreatAngleNorm : 0, -1, 1);
+    inputs[5] = clamp(Number.isFinite(nearestMateDistNorm) ? nearestMateDistNorm : 0, 0, 1);
+    inputs[6] = clamp(Number.isFinite(nearestMateAngleNorm) ? nearestMateAngleNorm : 0, -1, 1);
+    inputs[7] = clamp(Number.isFinite(energyRatio) ? energyRatio : 0, 0, 1);
+    inputs[8] = clamp(Number.isFinite(biomeDragStress) ? biomeDragStress : 0, 0, 1);
+    inputs[9] = clamp(Number.isFinite(solarIntensity) ? solarIntensity : 0, 0, 1);
+
+    // Forward pass
+    if (!this.brain) {
+      this.brain = new NeuralBrain(this.genome.brainWeights);
+    }
+    const outputs = this.brain.forward(inputs);
+    const steerAngleDelta = Number.isFinite(outputs[0]) ? outputs[0] : 0.0;
+    const thrustMagnitude = Number.isFinite(outputs[1]) ? outputs[1] : 0.0;
+    const courtshipDesire = Number.isFinite(outputs[2]) ? outputs[2] : 0.0;
+    const aggressionImpulse = Number.isFinite(outputs[3]) ? outputs[3] : 0.0;
+
+    // Motor Actuation
+    const desiredHeading = this.heading + steerAngleDelta;
+    const desiredVel = Vector2D.fromAngle(desiredHeading, this.genome.speed * thrustMagnitude);
+    const steerForce = Vector2D.sub(desiredVel, this.velocity);
+    steerForce.limit(0.55);
+    this.applyForce(steerForce);
+
+    // Cache telemetry and targets
+    this.lastNeuralInputs = inputs;
+    this.lastNeuralOutputs = outputs;
+    this.currentTarget = closestFoodEntity;
+    this.threatTarget = closestThreat;
+    this.courtshipTarget = closestMate;
+    this.state = 'neural';
+    const thrustPct = (thrustMagnitude * 100).toFixed(0);
+    const turnDeg = (steerAngleDelta * 180 / Math.PI).toFixed(0);
+    this.currentIntention = `Neural: Thrust ${thrustPct}%, Turn ${turnDeg}°`;
+
+    return {
+      steerAngleDelta,
+      thrustMagnitude,
+      courtshipDesire,
+      aggressionImpulse,
+      inputs,
+      outputs
+    };
+  }
+
+  /**
    * Evaluates sensory perception and steers towards targets or away from predators.
    * @param {Object} env Environment context
    * @param {SpatialGrid} env.foodGrid
@@ -267,6 +496,11 @@ export class Creature {
         this.velocity.mult(0.94); // gentle drag
       }
       return { action: 'possessed', target: null };
+    }
+
+    // Neural Brain Autonomous Steering
+    if (this.brainType === 'neural') {
+      return this.evaluateNeuralBehavior(env);
     }
 
     // Circadian nocturnal perception scaling
@@ -504,7 +738,7 @@ export class Creature {
     }
 
     // 4. Burn Primer Metabolic Energy
-    const isHunting = this.state === 'hunting' || this.state === 'fleeing';
+    const isHunting = this.state === 'hunting' || this.state === 'fleeing' || (this.brainType === 'neural' && (this.lastNeuralOutputs?.[3] ?? 0) > 0.45);
     const kineticMultiplier = env?.kineticMultiplier ?? 1.0;
     const burnRate = this.calculateMetabolicCost(currentSpeed, isHunting, kineticMultiplier);
     this.energy -= burnRate * dt;
@@ -548,7 +782,8 @@ export class Creature {
     }
 
     // 6. Predation: Carnivore Attacks Prey
-    if (this.state === 'hunting' && this.currentTarget && this.currentTarget.isAlive) {
+    const wantsHunt = this.state === 'hunting' || (this.brainType === 'neural' && (this.lastNeuralOutputs?.[3] ?? 0) > 0.45 && this.genome.diet >= 0.42);
+    if (wantsHunt && this.currentTarget && this.currentTarget.isAlive) {
       const prey = this.currentTarget;
       const dSq = this.position.distSq(prey.position);
       const attackRange = this.radius + prey.radius * 0.8;
@@ -591,7 +826,8 @@ export class Creature {
     }
 
     // 6.5 Sexual Reproduction (Courtship Encounter)
-    if (this.state === 'courtship' && this.courtshipTarget && this.courtshipTarget.isAlive) {
+    const wantsCourt = this.state === 'courtship' || (this.brainType === 'neural' && (this.lastNeuralOutputs?.[2] ?? 0) > 0.45);
+    if (wantsCourt && this.courtshipTarget && this.courtshipTarget.isAlive) {
       const partner = this.courtshipTarget;
       const dSq = this.position.distSq(partner.position);
       const contactDist = this.radius + partner.radius + 10;

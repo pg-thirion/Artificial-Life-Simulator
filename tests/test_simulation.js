@@ -285,9 +285,154 @@ assert(restoredGenome.brainWeights.length === 124, 'fromJSON restores 124 weight
 assert(restoredGenome.brainType === 'neural', 'fromJSON restores brainType');
 assertApprox(restoredGenome.distance(defaultGenome), 0.0, 1e-4, 'Restored genome genetic distance to original is 0');
 
+console.log('--- Testing Task 3: Normalized Sensory Pipeline & Neural Steering Integration ---');
+
+// 1. evaluateNeuralBehavior returns valid finite 10-input vector in empty environment
+const neuralCreature1 = new Creature(500, 500, new Genome({ brainType: 'neural', sense: 100 }));
+assert(neuralCreature1.brainType === 'neural', 'Creature has neural brainType');
+const emptyResult = neuralCreature1.evaluateNeuralBehavior({});
+assert(emptyResult.inputs instanceof Float32Array, 'Neural inputs is Float32Array');
+assert(emptyResult.inputs.length === 10, 'Neural inputs length is exactly 10');
+assert(emptyResult.outputs instanceof Float32Array, 'Neural outputs is Float32Array');
+assert(emptyResult.outputs.length === 4, 'Neural outputs length is exactly 4');
+
+let allEmptyFinite = true;
+for (let i = 0; i < 10; i++) {
+  if (!Number.isFinite(emptyResult.inputs[i])) allEmptyFinite = false;
+}
+assert(allEmptyFinite, 'All inputs are finite in empty environment');
+assertApprox(emptyResult.inputs[0], 0.0, 1e-4, 'Empty env nearestFoodDist is 0.0');
+assertApprox(emptyResult.inputs[1], 0.0, 1e-4, 'Empty env nearestFoodAngle is 0.0');
+assertApprox(emptyResult.inputs[2], 0.0, 1e-4, 'Empty env nearestFoodDangerSignal is 0.0');
+assertApprox(emptyResult.inputs[3], 0.0, 1e-4, 'Empty env nearestThreatDist is 0.0');
+assertApprox(emptyResult.inputs[4], 0.0, 1e-4, 'Empty env nearestThreatAngle is 0.0');
+assertApprox(emptyResult.inputs[5], 0.0, 1e-4, 'Empty env nearestMateDist is 0.0');
+assertApprox(emptyResult.inputs[6], 0.0, 1e-4, 'Empty env nearestMateAngle is 0.0');
+assert(emptyResult.inputs[7] >= 0.0 && emptyResult.inputs[7] <= 1.0, 'Energy ratio is normalized [0, 1]');
+assert(emptyResult.inputs[8] >= 0.0 && emptyResult.inputs[8] <= 1.0, 'Biome drag stress is normalized [0, 1]');
+assert(emptyResult.inputs[9] >= 0.0 && emptyResult.inputs[9] <= 1.0, 'Solar intensity is normalized [0, 1]');
+
+// 2. evaluateNeuralBehavior with populated environment (Food, Threat, Mate, Drag, Solar)
+const task3FoodGrid = new SpatialGrid(64, 1000, 1000);
+const task3CreatureGrid = new SpatialGrid(64, 1000, 1000);
+
+// Place food directly ahead of creature (heading = 0, along +X axis)
+neuralCreature1.position.set(500, 500);
+neuralCreature1.heading = 0; // facing +X
+neuralCreature1.velocity.set(1, 0);
+
+const plantPellet = new FoodPellet(550, 500, 'plant', 30); // 50 units away (sense is 100 => distNorm = 1 - 50/100 = 0.5)
+task3FoodGrid.insert(plantPellet);
+
+// Place a predator threat 25 units away to the right (+Y, angle PI/2 => relative angleNorm ~ 0.5)
+const threatCreature = new Creature(500, 525, new Genome({
+  size: neuralCreature1.genome.size * 1.5,
+  diet: 0.9,
+  speed: 2.0
+}));
+task3CreatureGrid.insert(threatCreature);
+
+// Place a compatible mate 80 units away (distNorm = 1 - 80/100 = 0.2)
+const mateCreature = new Creature(580, 500, neuralCreature1.genome.clone());
+task3CreatureGrid.insert(mateCreature);
+
+const populatedEnv = {
+  foodGrid: task3FoodGrid,
+  creatureGrid: task3CreatureGrid,
+  drag: 0.75,
+  solarIntensity: 0.42,
+  worldWidth: 1000,
+  worldHeight: 1000
+};
+
+const popResult = neuralCreature1.evaluateNeuralBehavior(populatedEnv);
+assertApprox(popResult.inputs[0], 0.5, 0.02, 'nearestFoodDistNorm computed accurately (1 - 50/100 = 0.5)');
+assertApprox(popResult.inputs[1], 0.0, 0.02, 'nearestFoodAngleNorm is ~0 when directly ahead');
+assertApprox(popResult.inputs[2], 0.0, 1e-4, 'nearestFoodDangerSignal is 0.0 for plant pellet');
+assert(neuralCreature1.currentTarget === plantPellet, 'currentTarget references detected food pellet');
+
+assertApprox(popResult.inputs[3], 0.75, 0.02, 'nearestThreatDistNorm computed accurately (1 - 25/100 = 0.75)');
+assertApprox(popResult.inputs[4], 0.5, 0.05, 'nearestThreatAngleNorm reflects +90 deg offset (~0.5)');
+assert(neuralCreature1.threatTarget === threatCreature, 'threatTarget references detected predator');
+
+assertApprox(popResult.inputs[5], 0.2, 0.02, 'nearestMateDistNorm computed accurately (1 - 80/100 = 0.2)');
+assertApprox(popResult.inputs[6], 0.0, 0.02, 'nearestMateAngleNorm is ~0 when directly ahead');
+assert(neuralCreature1.courtshipTarget === mateCreature, 'courtshipTarget references detected mate');
+
+assertApprox(popResult.inputs[8], 0.75, 1e-4, 'biomeDragStress captured from env.drag');
+assertApprox(popResult.inputs[9], 0.42, 1e-4, 'solarIntensity captured from env.solarIntensity');
+
+// Test carnivore prey detection and aposematic warning / armor danger signal
+const carnNeuralCreature = new Creature(500, 500, new Genome({
+  diet: 0.9,
+  size: 15,
+  speed: 3.0,
+  sense: 100,
+  brainType: 'neural'
+}));
+const preyCreatureGrid = new SpatialGrid(64, 1000, 1000);
+const toxicPrey = new Creature(530, 500, new Genome({
+  diet: 0.1,
+  size: 8,
+  armor: 0.85,
+  camouflage: 0.0
+}));
+preyCreatureGrid.insert(toxicPrey);
+const preyEnvResult = carnNeuralCreature.evaluateNeuralBehavior({
+  creatureGrid: preyCreatureGrid,
+  foodGrid: null,
+  worldWidth: 1000,
+  worldHeight: 1000
+});
+assert(carnNeuralCreature.currentTarget === toxicPrey, 'Carnivore targets prey creature');
+assert(preyEnvResult.inputs[0] > 0.0, 'Carnivore senses distance to prey');
+assertApprox(preyEnvResult.inputs[2], 0.85, 0.02, 'Prey armor / aposematic warning level captured in danger signal');
+
+// 3. Neural outputs bounding and telemetry caching
+assert(popResult.steerAngleDelta >= -Math.PI && popResult.steerAngleDelta <= Math.PI, 'steerAngleDelta bounded in [-PI, PI]');
+assert(popResult.thrustMagnitude >= 0.0 && popResult.thrustMagnitude <= 1.0, 'thrustMagnitude bounded in [0, 1]');
+assert(popResult.courtshipDesire >= 0.0 && popResult.courtshipDesire <= 1.0, 'courtshipDesire bounded in [0, 1]');
+assert(popResult.aggressionImpulse >= 0.0 && popResult.aggressionImpulse <= 1.0, 'aggressionImpulse bounded in [0, 1]');
+assert(neuralCreature1.lastNeuralInputs === popResult.inputs, 'lastNeuralInputs cached on creature');
+assert(neuralCreature1.lastNeuralOutputs === popResult.outputs, 'lastNeuralOutputs cached on creature');
+assert(neuralCreature1.state === 'neural', 'Creature state set to neural');
+assert(neuralCreature1.currentIntention.startsWith('Neural: Thrust'), 'Creature intention updated with telemetry string');
+
+// 4. Force application changes velocity as expected
+const testMotorCreature = new Creature(500, 500, new Genome({ brainType: 'neural', speed: 4.0 }));
+testMotorCreature.velocity.set(0, 0);
+testMotorCreature.acceleration.set(0, 0);
+// Configure weights to produce positive thrust
+testMotorCreature.brain.weights[BRAIN_CONFIG.B2_OFFSET + 1] = 4.0; // strong positive bias on thrust output
+testMotorCreature.evaluateNeuralBehavior({});
+assert(testMotorCreature.acceleration.mag() > 0, 'evaluateNeuralBehavior applies acceleration force via thrust');
+testMotorCreature.update(0.1, { worldWidth: 1000, worldHeight: 1000 });
+assert(testMotorCreature.velocity.mag() > 0, 'Velocity increases in response to neural thrust force');
+
+// 5. Dual-brain execution dispatch
+const heuristicTestCreature = new Creature(500, 500, new Genome({ brainType: 'heuristic' }));
+assert(heuristicTestCreature.brainType === 'heuristic', 'Heuristic creature has brainType heuristic');
+const heuristicResult = heuristicTestCreature.evaluateBehavior({});
+assert(heuristicResult.action !== undefined, 'Heuristic evaluateBehavior returns action object');
+assert(heuristicTestCreature.state !== 'neural', 'Heuristic creature does not enter neural state');
+
+const neuralDispatchCreature = new Creature(500, 500, new Genome({ brainType: 'neural' }));
+const neuralResult = neuralDispatchCreature.evaluateBehavior({});
+assert(neuralResult.steerAngleDelta !== undefined, 'Neural evaluateBehavior returns steerAngleDelta');
+assert(neuralDispatchCreature.state === 'neural', 'Neural creature enters neural state');
+
+// Possessed creature preserves player control over both brain types
+neuralDispatchCreature.isPossessed = true;
+neuralDispatchCreature.playerInputVector.set(1, 0);
+const possessedResult = neuralDispatchCreature.evaluateBehavior({});
+assert(possessedResult.action === 'possessed', 'Player possession takes precedence over neural brain');
+assert(neuralDispatchCreature.state === 'possessed', 'Possessed creature state is possessed');
+neuralDispatchCreature.isPossessed = false;
+
 console.log('--- Testing Piece 2: Creature Physics, Metabolism & AI ---');
 
 const creature = new Creature(500, 500, herbGenome, 100);
+creature.brainType = 'heuristic';
 
 // Primer metabolic equation verification:
 // Cost = basal(size^3 * 0.0015 * metabolismRate) + move(size * speed^2 * 0.014) + sense(sense * 0.003) + huntingMod
@@ -378,8 +523,8 @@ assert(creature.causeOfDeath === 'starvation', 'Cause of death is starvation');
 
 console.log('--- Testing Predation & Steering Behaviors ---');
 
-const predGenome = new Genome({ size: 14, speed: 3.5, sense: 120, diet: 0.9, bravery: 0.8 });
-const testPreyGenome = new Genome({ size: 6, speed: 2.0, sense: 80, diet: 0.1, bravery: 0.2 });
+const predGenome = new Genome({ size: 14, speed: 3.5, sense: 120, diet: 0.9, bravery: 0.8, brainType: 'heuristic' });
+const testPreyGenome = new Genome({ size: 6, speed: 2.0, sense: 80, diet: 0.1, bravery: 0.2, brainType: 'heuristic' });
 const carnivore = new Creature(400, 400, predGenome, 80);
 const prey = new Creature(408, 400, testPreyGenome, 40);
 
@@ -602,8 +747,8 @@ import('../src/world.js').then(async ({ World }) => {
   assert(world.pheromones[world.pheromones.length - 1].strength < 1.0, 'Pheromone evaporates over time');
 
   // 9: Sexual Reproduction & Chromosomal Recombination
-  const parentA = new Creature(100, 100, new Genome({ speed: 2.0, sense: 80, diet: 0.1, armor: 0.8 }));
-  const parentB = new Creature(105, 105, new Genome({ speed: 3.0, sense: 120, diet: 0.2, armor: 0.4 }));
+  const parentA = new Creature(100, 100, new Genome({ speed: 2.0, sense: 80, diet: 0.1, armor: 0.8, brainType: 'heuristic' }));
+  const parentB = new Creature(105, 105, new Genome({ speed: 3.0, sense: 120, diet: 0.2, armor: 0.4, brainType: 'heuristic' }));
   parentA.energy = 160;
   parentB.energy = 160;
   parentA.age = 10;
@@ -664,6 +809,41 @@ import('../src/world.js').then(async ({ World }) => {
   chartMgr.currentTab = 'fossils';
   chartMgr.render(world);
   assert(chartMgr.currentTab === 'fossils', 'ChartManager renders Fossils & Lineage tab');
+
+  console.log('--- Testing Task 3: Dual-Brain Multi-Frame World Integration ---');
+  // Run 100 frames of simulation with mixed neural and heuristic creatures
+  const mixedWorld = new World({
+    width: 2000,
+    height: 1500,
+    initialHerbivores: 15,
+    initialCarnivores: 5,
+    initialOmnivores: 5,
+    maxFood: 100
+  });
+
+  // Assign half to neural, half to heuristic
+  for (let i = 0; i < mixedWorld.creatures.length; i++) {
+    mixedWorld.creatures[i].brainType = (i % 2 === 0) ? 'neural' : 'heuristic';
+  }
+
+  // Advance simulation for 100 frames
+  for (let f = 0; f < 100; f++) {
+    mixedWorld.update(0.05);
+  }
+
+  assert(mixedWorld.creatures.length > 0, 'World maintains living population across 100 frames');
+  let allFiniteState = true;
+  for (const c of mixedWorld.creatures) {
+    if (!Number.isFinite(c.position.x) || !Number.isFinite(c.position.y)) allFiniteState = false;
+    if (!Number.isFinite(c.velocity.x) || !Number.isFinite(c.velocity.y)) allFiniteState = false;
+    if (!Number.isFinite(c.energy) || c.energy < 0) allFiniteState = false;
+    if (c.brainType === 'neural' && c.isAlive) {
+      if (!c.lastNeuralInputs || !c.lastNeuralOutputs) allFiniteState = false;
+    }
+  }
+  assert(allFiniteState, 'All surviving creatures maintain finite physics and neural telemetry across 100 frames');
+  assert(mixedWorld.creatures.some(c => c.brainType === 'neural'), 'Neural organisms active in mixed ecosystem');
+  assert(mixedWorld.creatures.some(c => c.brainType === 'heuristic'), 'Heuristic organisms active in mixed ecosystem');
 
   console.log('--- Testing Piece 6: Web Audio Synthesizer Interface ---');
   const { SoundSynthesizer, sound } = await import('../src/audio.js');
