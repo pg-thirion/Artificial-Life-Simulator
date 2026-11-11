@@ -701,6 +701,15 @@
     <div class="stats-row"><span>Age / Lifespan:</span><strong id="insp-age">12s / 80s</strong></div>
     <div class="stats-row"><span>Offspring:</span><strong id="insp-offspring">0</strong></div>
     <div class="stats-row"><span>Kills / Plants:</span><strong id="insp-diet-stat">0 / 0</strong></div>
+    <div class="stats-row"><span>Brain:</span><strong id="insp-brain-type" style="color: #c084fc; cursor: pointer;" title="Click to toggle Neural / Heuristic">NEURAL (124 syn)</strong></div>
+
+    <div class="brain-viz-box" style="margin-top: 4px; border: 1px solid rgba(255,255,255,0.1); border-radius: 6px; overflow: hidden; background: rgba(15, 23, 42, 0.7);">
+      <div style="font-size: 9px; color: #94a3b8; padding: 3px 6px; display: flex; justify-content: space-between; border-bottom: 1px solid rgba(255,255,255,0.06);">
+        <span>LIVE NEURAL TOPOLOGY (10→8→4)</span>
+        <span id="insp-brain-Summary">Active</span>
+      </div>
+      <canvas id="insp-brain-canvas" width="268" height="165" style="display: block; width: 100%; height: 165px;"></canvas>
+    </div>
 
     <!-- Inspector Action Buttons -->
     <div class="insp-actions">

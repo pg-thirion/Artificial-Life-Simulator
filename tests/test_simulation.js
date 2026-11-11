@@ -11,6 +11,7 @@ import { Genome, GENE_BOUNDS } from '../src/genome.js';
 import { Creature } from '../src/creature.js';
 import { Colony } from '../src/colony.js';
 import { NeuralBrain, BRAIN_CONFIG } from '../src/neuralBrain.js';
+import { NeuralVisualizer, INPUT_LABELS, OUTPUT_LABELS } from '../src/neuralVisualizer.js';
 
 let passed = 0;
 let failed = 0;
@@ -1414,10 +1415,11 @@ import('../src/world.js').then(async ({ World }) => {
 
   // 8: Chemical Ecology: Pheromones
   world.addPheromone(250, 250, 'food', 1.0, 4.0);
+  const trackedPheromone = world.pheromones[world.pheromones.length - 1];
   assert(world.pheromones.length > 0, 'Emitted food scent pheromone');
-  assert(world.pheromones[world.pheromones.length - 1].type === 'food', 'Pheromone has correct type');
+  assert(trackedPheromone.type === 'food', 'Pheromone has correct type');
   world.update(1.0);
-  assert(world.pheromones[world.pheromones.length - 1].strength < 1.0, 'Pheromone evaporates over time');
+  assert(trackedPheromone.strength < 1.0, 'Pheromone evaporates over time');
 
   // 9: Sexual Reproduction & Chromosomal Recombination
   const parentA = new Creature(100, 100, new Genome({ speed: 2.0, sense: 80, diet: 0.1, armor: 0.8, brainType: 'heuristic' }));
@@ -1559,7 +1561,8 @@ import('../src/world.js').then(async ({ World }) => {
   assert(colonyWorld.colonies[0].cells.length === 2, 'Colony contains both organisms');
 
   // B. Third conspecific colliding joins the existing colony
-  const adhC = new Creature(505, 510, new Genome({ adhesion: 0.7, size: 8, speciesId: 'sp_colony_test' }), 100);
+  const adhC = new Creature(adhA.position.x + 2, adhA.position.y + 2, new Genome({ adhesion: 0.7, size: 8, speciesId: 'sp_colony_test' }), 100);
+  adhC.velocity.set(0, 0);
   colonyWorld.creatures.push(adhC);
   colonyWorld.creatureGrid.insert(adhC);
 
@@ -1626,6 +1629,103 @@ import('../src/world.js').then(async ({ World }) => {
   synth.extinction();
   synth.meteor();
   assert(true, 'Audio sound trigger methods execute gracefully without headless audio context error');
+
+  console.log('--- Testing Task 7: Live Neural Network Visualizer ---');
+
+  // 1. Null-safety & Labels Verification
+  const nullViz = new NeuralVisualizer(null);
+  assert(nullViz.canvas === null && nullViz.ctx === null, 'NeuralVisualizer handles null canvas safely');
+  nullViz.render(new NeuralBrain(), 'neural');
+  nullViz.render(null, 'heuristic');
+  assert(Array.isArray(nullViz.INPUT_LABELS) && nullViz.INPUT_LABELS.length === 10, 'NeuralVisualizer defines 10 INPUT_LABELS');
+  assert(Array.isArray(nullViz.OUTPUT_LABELS) && nullViz.OUTPUT_LABELS.length === 4, 'NeuralVisualizer defines 4 OUTPUT_LABELS');
+  assert(INPUT_LABELS[0] === 'Food Dist' && INPUT_LABELS[9] === 'Solar', 'INPUT_LABELS match sensory specification');
+  assert(OUTPUT_LABELS[0] === 'Steer' && OUTPUT_LABELS[3] === 'Attack', 'OUTPUT_LABELS match motor specification');
+
+  // Helper to create mock canvas for NeuralVisualizer
+  function createVizMockCanvas(width = 268, height = 165) {
+    const texts = [];
+    const strokeStyles = [];
+    const fillStyles = [];
+    const arcs = [];
+    let lineToCount = 0;
+
+    const ctx = {
+      texts,
+      strokeStyles,
+      fillStyles,
+      arcs,
+      get lineToCount() { return lineToCount; },
+      clearRect: () => {},
+      fillRect: () => { fillStyles.push(ctx.fillStyle); },
+      save: () => {},
+      restore: () => {},
+      beginPath: () => {},
+      moveTo: () => {},
+      lineTo: () => { lineToCount++; },
+      arc: (x, y, r) => { arcs.push({ x, y, r }); },
+      fill: () => { fillStyles.push(ctx.fillStyle); },
+      stroke: () => { strokeStyles.push(ctx.strokeStyle); },
+      fillText: (text) => { texts.push(text); },
+      strokeStyle: '',
+      fillStyle: '',
+      lineWidth: 1,
+      font: '',
+      textAlign: '',
+      textBaseline: ''
+    };
+
+    return {
+      width,
+      height,
+      getContext: () => ctx,
+      ctx
+    };
+  }
+
+  // 2. Heuristic Mode & Null Brain Rendering
+  const heurMockCanvas = createVizMockCanvas();
+  const heurViz = new NeuralVisualizer(heurMockCanvas);
+  heurViz.render(new NeuralBrain(), 'heuristic');
+  assert(heurMockCanvas.ctx.texts.includes('Heuristic Rule Brain'), 'Heuristic mode renders Heuristic Rule Brain title');
+  assert(heurMockCanvas.ctx.texts.includes('Click Brain badge to switch to Neural'), 'Heuristic mode renders toggle subtitle');
+  assert(heurMockCanvas.ctx.lineToCount === 0, 'Heuristic mode does not draw synaptic weight lines');
+
+  const nullBrainCanvas = createVizMockCanvas();
+  const nullBrainViz = new NeuralVisualizer(nullBrainCanvas);
+  nullBrainViz.render(null, 'neural');
+  assert(nullBrainCanvas.ctx.texts.includes('Heuristic Rule Brain'), 'Null brain in neural mode falls back cleanly to heuristic message');
+
+  // 3. Live Neural Mode Rendering (10->8->4 Topology, Synapses, Nodes & Labels)
+  const neuralMockCanvas = createVizMockCanvas();
+  const neuralViz = new NeuralVisualizer(neuralMockCanvas);
+  const vizBrain = new NeuralBrain();
+  // Set explicit positive and negative weights to verify emerald green and coral red synapses
+  vizBrain.weights[0] = 2.0;   // positive W1 synapse
+  vizBrain.weights[1] = -2.0;  // negative W1 synapse
+  vizBrain.weights[88] = 1.8;  // positive W2 synapse
+  vizBrain.weights[89] = -1.8; // negative W2 synapse
+  // Run forward pass with active inputs
+  vizBrain.forward(new Float32Array([0.8, -0.6, 0.9, 0.4, -0.5, 0.2, 0.1, 0.75, 0.3, 0.9]));
+
+  neuralViz.render(vizBrain, 'neural');
+
+  // 80 W1 lines + 32 W2 lines = 112 synaptic lines
+  assert(neuralMockCanvas.ctx.lineToCount === 112, `NeuralVisualizer draws all 112 synaptic connections (got ${neuralMockCanvas.ctx.lineToCount})`);
+  assert(neuralMockCanvas.ctx.strokeStyles.some(s => s.startsWith('rgba(74, 222, 128,')), 'Positive weights rendered in emerald green rgba(74, 222, 128, ...)');
+  assert(neuralMockCanvas.ctx.strokeStyles.some(s => s.startsWith('rgba(248, 113, 113,')), 'Negative weights rendered in coral red rgba(248, 113, 113, ...)');
+
+  // 10 input + 8 hidden + 4 output = 22 core nodes of radius 4.5
+  const coreNodes = neuralMockCanvas.ctx.arcs.filter(a => Math.abs(a.r - 4.5) < 1e-4);
+  assert(coreNodes.length === 22, `NeuralVisualizer draws 22 core neuron nodes of radius 4.5 (got ${coreNodes.length})`);
+
+  // Verify input and output labels rendered
+  for (const inLabel of INPUT_LABELS) {
+    assert(neuralMockCanvas.ctx.texts.includes(inLabel), `NeuralVisualizer rendered input label "${inLabel}"`);
+  }
+  for (const outLabel of OUTPUT_LABELS) {
+    assert(neuralMockCanvas.ctx.texts.some(t => t.startsWith(outLabel)), `NeuralVisualizer rendered output label "${outLabel}" with numeric readout`);
+  }
 
   console.log(`\nResults: ${passed} passed, ${failed} failed.`);
   if (failed > 0) {

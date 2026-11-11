@@ -17,6 +17,7 @@ function stripImportsExports(code) {
 const moduleFiles = [
   'src/math.js',
   'src/neuralBrain.js',
+  'src/neuralVisualizer.js',
   'src/spatialGrid.js',
   'src/food.js',
   'src/genome.js',
@@ -294,7 +295,7 @@ const tutorialScript = `
 `;
 
 const templateHtml = fs.readFileSync(path.join(rootDir, 'src/template.html'), 'utf8');
-const appJsContent = fs.readFileSync(path.join(rootDir, 'src/app.js'), 'utf8');
+const appJsContent = stripImportsExports(fs.readFileSync(path.join(rootDir, 'src/app.js'), 'utf8'));
 
 const finalScript = `
   <script>

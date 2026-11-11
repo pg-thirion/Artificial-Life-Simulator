@@ -1,9 +1,14 @@
+import { NeuralVisualizer } from './neuralVisualizer.js';
+
 // Canvases
 const canvas = document.getElementById('sim-canvas');
 const ctx = canvas.getContext('2d');
 
 const chartCanvas = document.getElementById('chart-canvas');
 const chartManager = new ChartManager(chartCanvas);
+
+const brainCanvas = document.getElementById('insp-brain-canvas');
+const neuralVisualizer = new NeuralVisualizer(brainCanvas);
 
 const minimapCanvas = document.getElementById('minimap-canvas');
 const miniCtx = minimapCanvas.getContext('2d');
@@ -333,6 +338,16 @@ document.getElementById('btn-kill-creature').onclick = () => {
   }
 };
 
+const inspBrainTypeEl = document.getElementById('insp-brain-type');
+if (inspBrainTypeEl) {
+  inspBrainTypeEl.onclick = () => {
+    if (!selectedCreature || !selectedCreature.isAlive) return;
+    selectedCreature.brainType = selectedCreature.brainType === 'neural' ? 'heuristic' : 'neural';
+    updateInspectorUI();
+    showToast(`Creature #${selectedCreature.id} switched to ${selectedCreature.brainType.toUpperCase()} brain`, 'speciation');
+  };
+}
+
 // Live Gene Modifiers
 const geneSliders = {
   speed: document.getElementById('insp-slider-speed'),
@@ -378,6 +393,22 @@ function updateInspectorUI() {
   document.getElementById('insp-age').textContent = `${Math.round(c.age)}s / ${Math.round(c.lifespan)}s`;
   document.getElementById('insp-offspring').textContent = c.offspringCount;
   document.getElementById('insp-diet-stat').textContent = `${c.kills} / ${c.plantsEaten}`;
+
+  const brainTypeBadge = document.getElementById('insp-brain-type');
+  if (brainTypeBadge) {
+    if (c.brainType === 'neural') {
+      brainTypeBadge.textContent = 'NEURAL (124 syn)';
+      brainTypeBadge.style.color = '#c084fc';
+    } else {
+      brainTypeBadge.textContent = 'HEURISTIC (Rule)';
+      brainTypeBadge.style.color = '#38bdf8';
+    }
+  }
+  const brainSummaryEl = document.getElementById('insp-brain-Summary');
+  if (brainSummaryEl) {
+    brainSummaryEl.textContent = c.brainType === 'neural' ? 'Active' : 'Rule Mode';
+  }
+  neuralVisualizer.render(c.brain, c.brainType);
 
   if (btnPossess) {
     btnPossess.textContent = c.isPossessed ? 'Possess: ON' : 'Possess: OFF';
