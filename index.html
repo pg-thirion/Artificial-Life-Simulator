@@ -2954,6 +2954,14 @@ class Creature {
     this.hostCreature = null;
     this.parasiteOffsetAngle = 0;
 
+    // Multicellular Colony Dynamics
+    this.colony = null;
+    this.colonyRole = null;
+    this.colonyAngleOffset = 0;
+    this.colonyDistOffset = 0;
+    this.colonySpeedMultiplier = 1.0;
+    this.speedMultiplier = 1.0;
+
     // Dynamic chromatophore phenotypic coloration
     const initialRgb = getInitialGenomeRgb(this.genome);
     this._baseGenomeRgb = { r: initialRgb.r, g: initialRgb.g, b: initialRgb.b };
@@ -3438,6 +3446,13 @@ class Creature {
       return { action: 'latched', target: this.hostCreature };
     }
 
+    // Member cells of a colony delegate steering to the colony core cell
+    if (this.colony && this.colony.coreCell !== this) {
+      this.state = 'colony_member';
+      this.currentIntention = `Colony Member (${this.colonyRole || 'cell'})`;
+      return { action: 'colony_member', target: this.colony.coreCell };
+    }
+
     // Cleaner mutualist: seek host with attached parasites
     if (this.isCleaner && env && env.creatureGrid) {
       const infestedCandidates = env.creatureGrid.queryRadius(this.position.x, this.position.y, this.genome.sense, (c) => {
@@ -3727,26 +3742,31 @@ class Creature {
       }
     }
 
-    // 1. Evaluate steering AI
-    if (env) {
+    const isColonyMember = this.colony && this.colony.coreCell !== this;
+
+    // 1. Evaluate steering AI (skipped for member cells)
+    if (env && !isColonyMember) {
       this.evaluateBehavior(env);
       const boundaryForce = this.avoidBoundaries(env.worldWidth || 2400, env.worldHeight || 1600);
       this.applyForce(boundaryForce);
     }
 
     // 2. Integrate Physics (Verlet/Euler autonomous movement)
-    this.velocity.add(this.acceleration);
-    const maxSpd = (this.state === 'fleeing') ? this.genome.speed * 1.15 : this.genome.speed;
-    this.velocity.limit(maxSpd);
-    this.position.add(Vector2D.mult(this.velocity, dt * 60.0));
-    this.acceleration.set(0, 0);
+    if (!isColonyMember) {
+      this.velocity.add(this.acceleration);
+      const colonyMult = (this.colony && this.colony.coreCell === this) ? (this.colonySpeedMultiplier ?? this.speedMultiplier ?? 1.0) : 1.0;
+      const maxSpd = ((this.state === 'fleeing') ? this.genome.speed * 1.15 : this.genome.speed) * colonyMult;
+      this.velocity.limit(maxSpd);
+      this.position.add(Vector2D.mult(this.velocity, dt * 60.0));
+      this.acceleration.set(0, 0);
 
-    // Hard boundary clamp safety
-    if (env) {
-      const w = env.worldWidth || 2400;
-      const h = env.worldHeight || 1600;
-      this.position.x = clamp(this.position.x, this.radius, w - this.radius);
-      this.position.y = clamp(this.position.y, this.radius, h - this.radius);
+      // Hard boundary clamp safety
+      if (env) {
+        const w = env.worldWidth || 2400;
+        const h = env.worldHeight || 1600;
+        this.position.x = clamp(this.position.x, this.radius, w - this.radius);
+        this.position.y = clamp(this.position.y, this.radius, h - this.radius);
+      }
     }
 
     // 3. Smooth Heading & Squish Factor
@@ -3754,12 +3774,14 @@ class Creature {
     this.distanceTraveled += currentSpeed * dt * 60.0;
 
     if (currentSpeed > 0.05) {
-      const targetHeading = this.velocity.heading();
-      // Smooth angle interpolation
-      let diff = targetHeading - this.heading;
-      while (diff < -Math.PI) diff += Math.PI * 2;
-      while (diff > Math.PI) diff -= Math.PI * 2;
-      this.heading += diff * clamp(dt * 12.0, 0, 1);
+      if (!isColonyMember) {
+        const targetHeading = this.velocity.heading();
+        // Smooth angle interpolation
+        let diff = targetHeading - this.heading;
+        while (diff < -Math.PI) diff += Math.PI * 2;
+        while (diff > Math.PI) diff -= Math.PI * 2;
+        this.heading += diff * clamp(dt * 12.0, 0, 1);
+      }
 
       // Organic tail oscillation
       this.tailWiggle += dt * (this.tailWiggleSpeed + currentSpeed * 2.5);
@@ -3912,7 +3934,7 @@ class Creature {
           const predatorAttack = this.genome.size * (this.genome.bravery ?? 0.5);
           if (preyDefense > predatorAttack * 0.75) {
             const retaliation = clamp((preyDefense / predatorAttack) * 16, 4, 30);
-            this.energy -= retaliation;
+            this.takeDamage(retaliation);
             if (env && env.addFloatingText) {
               env.addFloatingText(this.position.x, this.position.y - 12, 'DEFENDED!', '#f59e0b');
             }
@@ -4427,6 +4449,25 @@ class Creature {
   }
 
   /**
+   * Applies damage to this creature, mitigating 60% if protected by colony armor cells.
+   * @param {number} amt Raw incoming damage
+   * @returns {number} Actual damage inflicted
+   */
+  takeDamage(amt) {
+    if (amt <= 0 || !this.isAlive) return 0;
+    let finalDamage = amt;
+    if (this.colony && this.colony.cells.some(c => c.colonyRole === 'armor')) {
+      finalDamage *= 0.40; // 60% damage mitigation
+    }
+    this.energy -= finalDamage;
+    if (this.energy <= 0) {
+      this.energy = 0;
+      this.die('predation');
+    }
+    return finalDamage;
+  }
+
+  /**
    * Handles organism demise, cleanly detaching all symbiotic links.
    * @param {string} [cause='natural'] Cause of death
    */
@@ -4438,13 +4479,16 @@ class Creature {
   }
 
   /**
-   * Cleans up symbiotic attachments when this organism ceases living.
+   * Cleans up symbiotic attachments and colony membership when this organism ceases living.
    */
   onDeath() {
     if (this.hostCreature) {
       this.detachFromHost();
     }
     this.detachAllParasites();
+    if (this.colony) {
+      this.colony.removeCell(this);
+    }
   }
 
   /**
@@ -4456,12 +4500,313 @@ class Creature {
 }
 
 
+/* --- src/colony.js --- */
+/**
+ * Artificial Life Simulator - Multicellular Colony Coordinator & Cellular Differentiation
+ * Implements multicellular super-organisms with specialized differentiated cell roles
+ * ('mouth', 'motor', 'armor'), shared energy pooling, coordinated polar movement locking,
+ * and asexual offshoot fission.
+ */
+
+
+
+let NEXT_COLONY_ID = 1;
+
+/**
+ * Standard relative polar offsets for member cells 1..5 relative to coreCell (index 0).
+ */
+const MEMBER_ROLE_CONFIGS = [
+  { role: 'motor', angle: Math.PI, distMult: 1.8 },
+  { role: 'armor', angle: -Math.PI / 2, distMult: 1.8 },
+  { role: 'armor', angle: Math.PI / 2, distMult: 1.8 },
+  { role: 'motor', angle: (3 * Math.PI) / 4, distMult: 2.2 },
+  { role: 'motor', angle: (-3 * Math.PI) / 4, distMult: 2.2 }
+];
+
+class Colony {
+  /**
+   * @param {Creature[]} [cells=[]] Initial member organisms
+   */
+  constructor(cells = []) {
+    this.id = NEXT_COLONY_ID++;
+    this.cells = [];
+    this.coreCell = null;
+    this.speedMultiplier = 1.0;
+
+    for (const cell of cells) {
+      this.addCell(cell);
+    }
+  }
+
+  /**
+   * Appends an organism to the colony if capacity (< 6) and not already in a colony.
+   * @param {Creature} creature 
+   * @returns {boolean} True if successfully added
+   */
+  addCell(creature) {
+    if (!creature || creature.colony || this.cells.length >= 6) {
+      return false;
+    }
+    this.cells.push(creature);
+    creature.colony = this;
+    if (!this.coreCell) {
+      this.coreCell = creature;
+    }
+    this.recalculateRoles();
+    return true;
+  }
+
+  /**
+   * Removes an organism from the colony, reassigning core and recalculating roles,
+   * or dissolving if <= 1 cell remains.
+   * @param {Creature} creature 
+   * @returns {boolean} True if removed
+   */
+  removeCell(creature) {
+    const idx = this.cells.indexOf(creature);
+    if (idx === -1) return false;
+
+    this.cells.splice(idx, 1);
+    creature.colony = null;
+    creature.colonyRole = null;
+    creature.colonyAngleOffset = 0;
+    creature.colonyDistOffset = 0;
+
+    if (creature === this.coreCell) {
+      if (this.cells.length > 0) {
+        const living = this.cells.filter(c => c.isAlive);
+        const candidates = living.length > 0 ? living : this.cells;
+        candidates.sort((a, b) => {
+          const sizeA = a.radius ?? a.genome?.size ?? 0;
+          const sizeB = b.radius ?? b.genome?.size ?? 0;
+          return sizeB - sizeA;
+        });
+        this.coreCell = candidates[0] || null;
+      } else {
+        this.coreCell = null;
+      }
+    }
+
+    if (this.cells.length <= 1) {
+      if (this.cells.length === 1) {
+        const remaining = this.cells[0];
+        remaining.colony = null;
+        remaining.colonyRole = null;
+        remaining.colonyAngleOffset = 0;
+        remaining.colonyDistOffset = 0;
+      }
+      this.cells = [];
+      this.coreCell = null;
+    } else {
+      this.recalculateRoles();
+    }
+
+    return true;
+  }
+
+  /**
+   * Recalculates specialized cellular roles and polar position offsets.
+   */
+  recalculateRoles() {
+    if (this.cells.length === 0) return;
+
+    if (!this.coreCell || !this.cells.includes(this.coreCell)) {
+      const living = this.cells.filter(c => c.isAlive);
+      const candidates = living.length > 0 ? living : this.cells;
+      candidates.sort((a, b) => {
+        const sizeA = a.radius ?? a.genome?.size ?? 0;
+        const sizeB = b.radius ?? b.genome?.size ?? 0;
+        return sizeB - sizeA;
+      });
+      this.coreCell = candidates[0];
+    }
+
+    // Core Cell: Mouth / Navigation leader
+    this.coreCell.colonyRole = 'mouth';
+    this.coreCell.colonyAngleOffset = 0;
+    this.coreCell.colonyDistOffset = 0;
+
+    // Remaining cells 1..N-1: Specialized peripheral roles
+    const otherCells = this.cells.filter(c => c !== this.coreCell);
+    for (let i = 0; i < otherCells.length; i++) {
+      const member = otherCells[i];
+      const cfg = MEMBER_ROLE_CONFIGS[i] || { role: 'motor', angle: Math.PI, distMult: 2.0 };
+      member.colonyRole = cfg.role;
+      member.colonyAngleOffset = cfg.angle;
+      member.colonyDistOffset = this.coreCell.radius * cfg.distMult;
+
+      // Synchronize polar coordinates immediately
+      const worldAngle = this.coreCell.heading + member.colonyAngleOffset;
+      member.position.x = this.coreCell.position.x + Math.cos(worldAngle) * member.colonyDistOffset;
+      member.position.y = this.coreCell.position.y + Math.sin(worldAngle) * member.colonyDistOffset;
+      member.heading = this.coreCell.heading;
+      if (member.velocity && this.coreCell.velocity) {
+        member.velocity.set(this.coreCell.velocity.x, this.coreCell.velocity.y);
+      }
+    }
+  }
+
+  /**
+   * Main colony tick: prunes dead cells, pools energy, synchronizes locomotion,
+   * and triggers offshoot splitting if saturated.
+   * @param {number} dt Delta time
+   * @param {Object} [env=null] Environment telemetry
+   * @returns {Creature|null} Split offshoot child if one was detached
+   */
+  update(dt, env = null) {
+    // 1. Prune dead cells
+    for (let i = this.cells.length - 1; i >= 0; i--) {
+      const c = this.cells[i];
+      if (!c.isAlive) {
+        this.removeCell(c);
+      }
+    }
+
+    // 2. Dissolve colony if <= 1 cell left
+    if (this.cells.length <= 1) {
+      if (this.cells.length === 1) {
+        const remaining = this.cells[0];
+        remaining.colony = null;
+        remaining.colonyRole = null;
+        remaining.colonyAngleOffset = 0;
+        remaining.colonyDistOffset = 0;
+        this.cells = [];
+        this.coreCell = null;
+      }
+      return null;
+    }
+
+    // 3. Energy Pooling: sum and divide total energy evenly
+    let totalEnergy = 0;
+    for (const c of this.cells) {
+      totalEnergy += c.energy;
+    }
+    const pooledEnergy = totalEnergy / this.cells.length;
+    for (const c of this.cells) {
+      c.energy = pooledEnergy;
+    }
+
+    // 4. Locomotion & Coordination: motor cell speed boost and rigid polar positioning
+    const motorCount = this.cells.filter(c => c.colonyRole === 'motor').length;
+    this.speedMultiplier = 1.0 + motorCount * 0.25;
+
+    if (this.coreCell) {
+      this.coreCell.colonySpeedMultiplier = this.speedMultiplier;
+      this.coreCell.speedMultiplier = this.speedMultiplier;
+
+      for (const c of this.cells) {
+        if (c === this.coreCell) continue;
+        const worldAngle = this.coreCell.heading + c.colonyAngleOffset;
+        c.position.x = this.coreCell.position.x + Math.cos(worldAngle) * c.colonyDistOffset;
+        c.position.y = this.coreCell.position.y + Math.sin(worldAngle) * c.colonyDistOffset;
+        c.heading = this.coreCell.heading;
+        if (c.velocity && this.coreCell.velocity) {
+          c.velocity.set(this.coreCell.velocity.x, this.coreCell.velocity.y);
+        }
+      }
+    }
+
+    // 5. Offshoot Splitting: Saturated colony produces independent offspring
+    if (this.cells.length >= 6 && totalEnergy > 800) {
+      return this.splitOffshoot();
+    }
+
+    return null;
+  }
+
+  /**
+   * Detaches the last peripheral cell from the colony with starting fuel.
+   * @returns {Creature|null} Detached child creature
+   */
+  splitOffshoot() {
+    if (this.cells.length <= 1) return null;
+    const child = this.cells[this.cells.length - 1];
+    this.removeCell(child);
+    child.energy = 50;
+    return child;
+  }
+
+  /**
+   * Renders glowing cytoplasmic bridges and differentiated role badges.
+   * @param {CanvasRenderingContext2D} ctx 
+   */
+  draw(ctx) {
+    if (!ctx || !this.coreCell || this.cells.length <= 1) return;
+
+    // 1. Glowing bioluminescent cytoplasmic bridges
+    for (const c of this.cells) {
+      if (c === this.coreCell || !c.isAlive) continue;
+      if (ctx.save) ctx.save();
+
+      // Outer cytoplasmic tether
+      if (ctx.beginPath) ctx.beginPath();
+      if (ctx.moveTo) ctx.moveTo(this.coreCell.position.x, this.coreCell.position.y);
+      if (ctx.lineTo) ctx.lineTo(c.position.x, c.position.y);
+      ctx.strokeStyle = 'rgba(56, 189, 248, 0.45)';
+      ctx.lineWidth = Math.max(3, Math.min(this.coreCell.radius, c.radius) * 0.45);
+      ctx.lineCap = 'round';
+      if (ctx.stroke) ctx.stroke();
+
+      // Inner nutrient canal
+      if (ctx.beginPath) ctx.beginPath();
+      if (ctx.moveTo) ctx.moveTo(this.coreCell.position.x, this.coreCell.position.y);
+      if (ctx.lineTo) ctx.lineTo(c.position.x, c.position.y);
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
+      ctx.lineWidth = Math.max(1, ctx.lineWidth * 0.3);
+      if (ctx.stroke) ctx.stroke();
+
+      if (ctx.restore) ctx.restore();
+    }
+
+    // 2. Specialized role badges
+    for (const c of this.cells) {
+      if (!c.isAlive) continue;
+      if (ctx.save) ctx.save();
+
+      if (c.colonyRole === 'mouth') {
+        // 'mouth': Glowing feeding corona ring around core
+        if (ctx.beginPath) ctx.beginPath();
+        if (ctx.arc) ctx.arc(c.position.x, c.position.y, c.radius + 3.5, 0, Math.PI * 2);
+        ctx.strokeStyle = 'rgba(244, 63, 94, 0.85)';
+        ctx.lineWidth = 2.5;
+        if (ctx.stroke) ctx.stroke();
+      } else if (c.colonyRole === 'armor') {
+        // 'armor': Defensive blue chitin shield arc
+        if (ctx.beginPath) ctx.beginPath();
+        const heading = c.heading || 0;
+        if (ctx.arc) ctx.arc(c.position.x, c.position.y, c.radius + 4, heading - Math.PI / 2, heading + Math.PI / 2);
+        ctx.strokeStyle = 'rgba(148, 163, 184, 0.7)';
+        ctx.lineWidth = 3.5;
+        ctx.lineCap = 'round';
+        if (ctx.stroke) ctx.stroke();
+      } else if (c.colonyRole === 'motor') {
+        // 'motor': Elongated flagella tails
+        const heading = c.heading || 0;
+        const tailAngle = heading + Math.PI;
+        const tailLen = c.radius * 2.2;
+        if (ctx.beginPath) ctx.beginPath();
+        if (ctx.moveTo) ctx.moveTo(c.position.x, c.position.y);
+        if (ctx.lineTo) {
+          ctx.lineTo(c.position.x + Math.cos(tailAngle) * tailLen, c.position.y + Math.sin(tailAngle) * tailLen);
+        }
+        ctx.strokeStyle = 'rgba(56, 189, 248, 0.75)';
+        ctx.lineWidth = 2.0;
+        if (ctx.stroke) ctx.stroke();
+      }
+
+      if (ctx.restore) ctx.restore();
+    }
+  }
+}
+
+
 /* --- src/world.js --- */
 /**
  * Artificial Life Simulator - World Engine & Ecosystem Coordinator
  * Implements Lotka-Volterra dynamics, continuous phylogenetic speciation,
  * extinction tracking, climate/seasonal temperature oscillations, and disaster events.
  */
+
 
 
 
@@ -4498,6 +4843,9 @@ class World {
 
     /** @type {Creature[]} */
     this.creatures = [];
+
+    /** @type {Colony[]} */
+    this.colonies = [];
 
     // Ecosystem & Climate Dynamics
     this.time = 0; // Simulation time in seconds
@@ -4644,6 +4992,7 @@ class World {
    */
   populateInitial(herbivores, carnivores, omnivores) {
     this.creatures = [];
+    this.colonies = [];
     this.creatureGrid.clear();
     this.speciesRegistry.clear();
 
@@ -4688,6 +5037,7 @@ class World {
    */
   loadPreset(presetName) {
     this.creatures = [];
+    this.colonies = [];
     this.creatureGrid.clear();
     this.foodManager.clear();
     this.speciesRegistry.clear();
@@ -5518,6 +5868,64 @@ class World {
       this.registerCreatureSpecies(child, child.genome.speciesId);
     }
 
+    // 5.5 Multicellular Colony Formation & Coordination
+    for (let i = 0; i < this.creatures.length; i++) {
+      const c = this.creatures[i];
+      if (!c.isAlive) continue;
+      if ((c.genome?.adhesion ?? 0) < 0.5) continue;
+      if (c.colony && c.colony.cells.length >= 6) continue;
+
+      let candidates = [];
+      if (this.creatureGrid) {
+        candidates = this.creatureGrid.queryRadius(c.position.x, c.position.y, c.radius + 35, (other) => {
+          return other !== c && other.isAlive && (other.genome?.adhesion ?? 0) >= 0.5;
+        });
+      }
+      if (candidates.length === 0 && this.creatures.length < 500) {
+        candidates = this.creatures.filter(other => {
+          if (other === c || !other.isAlive || (other.genome?.adhesion ?? 0) < 0.5) return false;
+          const rSum = c.radius + other.radius + 6;
+          return c.position.distSq(other.position) <= rSum * rSum;
+        });
+      }
+
+      for (const other of candidates) {
+        if (c.colony && c.colony === other.colony) continue;
+        if (c.colony && other.colony) continue;
+        if (other.colony && other.colony.cells.length >= 6) continue;
+
+        const isConspecific = (c.genome?.speciesId && other.genome?.speciesId)
+          ? (c.genome.speciesId === other.genome.speciesId)
+          : (c.genome?.geneticDistance && other.genome && c.genome.geneticDistance(other.genome) <= 0.28);
+        if (!isConspecific) continue;
+
+        const contactDist = c.radius + other.radius + 6;
+        if (c.position.distSq(other.position) <= contactDist * contactDist) {
+          if (!c.colony && !other.colony) {
+            const newColony = new Colony([c, other]);
+            this.colonies.push(newColony);
+            break;
+          } else if (c.colony && !other.colony) {
+            c.colony.addCell(other);
+            break;
+          } else if (!c.colony && other.colony) {
+            other.colony.addCell(c);
+            break;
+          }
+        }
+      }
+    }
+
+    // Update all active colonies & prune dissolved ones
+    for (let i = this.colonies.length - 1; i >= 0; i--) {
+      const col = this.colonies[i];
+      const offshoot = col.update(dt, env);
+      if (offshoot && env && env.addFloatingText) {
+        env.addFloatingText(offshoot.position.x, offshoot.position.y - 14, 'OFFSHOOT!', '#38bdf8');
+      }
+    }
+    this.colonies = this.colonies.filter(c => c.cells.length > 1);
+
     // 6. Natural Lotka-Volterra density stabilization: prevent total ecosystem collapse
     if (this.creatures.length < 12) {
       for (let i = 0; i < 8; i++) {
@@ -5592,6 +6000,13 @@ class World {
         ctx.fillText(ft.text, ft.x, ft.y);
       }
       ctx.restore();
+    }
+
+    // 4. Multicellular Colony Bridges and Badges
+    if (this.colonies && this.colonies.length > 0) {
+      for (const col of this.colonies) {
+        col.draw(ctx);
+      }
     }
   }
 }

@@ -21,6 +21,7 @@ const moduleFiles = [
   'src/food.js',
   'src/genome.js',
   'src/creature.js',
+  'src/colony.js',
   'src/world.js',
   'src/charts.js',
   'src/audio.js'

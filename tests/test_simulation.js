@@ -9,6 +9,7 @@ import { SpatialGrid } from '../src/spatialGrid.js';
 import { FoodPellet, FoodManager } from '../src/food.js';
 import { Genome, GENE_BOUNDS } from '../src/genome.js';
 import { Creature } from '../src/creature.js';
+import { Colony } from '../src/colony.js';
 import { NeuralBrain, BRAIN_CONFIG } from '../src/neuralBrain.js';
 
 let passed = 0;
@@ -864,6 +865,242 @@ drawParasite.draw(parasiteCtx);
 assert(parasiteCtx.strokeStyles.includes('#ef4444'), 'Latched parasite renders #ef4444 gripping tendrils/claws');
 assert(parasiteCtx.fillStyles.includes('#b91c1c'), 'Latched parasite renders #b91c1c gripping claws');
 
+console.log('--- Testing Task 6: Multicellular Colony Coordinator & Cellular Differentiation ---');
+
+// 1. Colony Initialization & Creature Colony Properties
+const cCell1 = new Creature(100, 100, new Genome({ size: 10, adhesion: 0.8 }));
+const cCell2 = new Creature(110, 100, new Genome({ size: 10, adhesion: 0.8 }));
+
+assert(cCell1.colony === null, 'Creature initializes colony as null');
+assert(cCell1.colonyRole === null, 'Creature initializes colonyRole as null');
+assert(cCell1.colonyAngleOffset === 0, 'Creature initializes colonyAngleOffset as 0');
+assert(cCell1.colonyDistOffset === 0, 'Creature initializes colonyDistOffset as 0');
+assert(cCell1.colonySpeedMultiplier === 1.0, 'Creature initializes colonySpeedMultiplier as 1.0');
+
+const emptyColony = new Colony();
+assert(typeof emptyColony.id === 'number' && emptyColony.id > 0, 'Colony generates positive numeric ID');
+assert(Array.isArray(emptyColony.cells) && emptyColony.cells.length === 0, 'Colony initializes empty cells array');
+assert(emptyColony.coreCell === null, 'Empty colony has null coreCell');
+assert(emptyColony.speedMultiplier === 1.0, 'Empty colony has 1.0 speedMultiplier');
+
+// 2. Colony Formation & Capacity Constraints (Max 6 Cells)
+const testColony = new Colony([cCell1, cCell2]);
+assert(testColony.cells.length === 2, 'Colony constructor adds initial cells');
+assert(testColony.coreCell === cCell1, 'First cell assigned as coreCell');
+assert(cCell1.colony === testColony, 'Core cell references colony');
+assert(cCell2.colony === testColony, 'Member cell references colony');
+
+// Cannot add creature already in a colony
+assert(testColony.addCell(cCell1) === false, 'Cannot add creature already in this colony');
+const otherCreature = new Creature(150, 150);
+const otherCol = new Colony([otherCreature]);
+assert(testColony.addCell(otherCreature) === false, 'Cannot add creature already in another colony');
+
+// Fill colony to 6 cells
+const cCell3 = new Creature(120, 100);
+const cCell4 = new Creature(130, 100);
+const cCell5 = new Creature(140, 100);
+const cCell6 = new Creature(150, 100);
+assert(testColony.addCell(cCell3) === true, 'Successfully added 3rd cell');
+assert(testColony.addCell(cCell4) === true, 'Successfully added 4th cell');
+assert(testColony.addCell(cCell5) === true, 'Successfully added 5th cell');
+assert(testColony.addCell(cCell6) === true, 'Successfully added 6th cell');
+assert(testColony.cells.length === 6, 'Colony holds exactly 6 cells');
+
+// 7th cell rejected (capacity limit)
+const cCell7 = new Creature(160, 100);
+assert(testColony.addCell(cCell7) === false, 'addCell returns false when colony is at 6-cell capacity');
+assert(testColony.cells.length === 6, 'Colony cell count remains 6');
+assert(cCell7.colony === null, 'Rejected creature colony remains null');
+
+// 3. Cellular Differentiation & Specialized Roles
+assert(cCell1.colonyRole === 'mouth', 'Core cell assigned mouth role');
+assert(cCell1.colonyAngleOffset === 0, 'Core mouth cell angle offset is 0');
+assert(cCell1.colonyDistOffset === 0, 'Core mouth cell dist offset is 0');
+
+assert(cCell2.colonyRole === 'motor', 'Member 1 assigned motor role');
+assertApprox(cCell2.colonyAngleOffset, Math.PI, 1e-4, 'Member 1 angle offset is PI');
+assertApprox(cCell2.colonyDistOffset, cCell1.radius * 1.8, 1e-4, 'Member 1 dist offset is coreCell.radius * 1.8');
+
+assert(cCell3.colonyRole === 'armor', 'Member 2 assigned armor role');
+assertApprox(cCell3.colonyAngleOffset, -Math.PI / 2, 1e-4, 'Member 2 angle offset is -PI/2');
+assertApprox(cCell3.colonyDistOffset, cCell1.radius * 1.8, 1e-4, 'Member 2 dist offset is coreCell.radius * 1.8');
+
+assert(cCell4.colonyRole === 'armor', 'Member 3 assigned armor role');
+assertApprox(cCell4.colonyAngleOffset, Math.PI / 2, 1e-4, 'Member 3 angle offset is PI/2');
+assertApprox(cCell4.colonyDistOffset, cCell1.radius * 1.8, 1e-4, 'Member 3 dist offset is coreCell.radius * 1.8');
+
+assert(cCell5.colonyRole === 'motor', 'Member 4 assigned motor role');
+assertApprox(cCell5.colonyAngleOffset, (3 * Math.PI) / 4, 1e-4, 'Member 4 angle offset is 3PI/4');
+assertApprox(cCell5.colonyDistOffset, cCell1.radius * 2.2, 1e-4, 'Member 4 dist offset is coreCell.radius * 2.2');
+
+assert(cCell6.colonyRole === 'motor', 'Member 5 assigned motor role');
+assertApprox(cCell6.colonyAngleOffset, (-3 * Math.PI) / 4, 1e-4, 'Member 5 angle offset is -3PI/4');
+assertApprox(cCell6.colonyDistOffset, cCell1.radius * 2.2, 1e-4, 'Member 5 dist offset is coreCell.radius * 2.2');
+
+// 4. Energy Pooling
+const poolCell1 = new Creature(200, 200, null, 120);
+const poolCell2 = new Creature(200, 200, null, 80);
+const poolCell3 = new Creature(200, 200, null, 40);
+const poolColony = new Colony([poolCell1, poolCell2, poolCell3]);
+
+assertApprox(poolCell1.energy + poolCell2.energy + poolCell3.energy, 240, 1e-4, 'Initial total energy is 240');
+poolColony.update(0.1, null);
+assertApprox(poolCell1.energy, 80.0, 1e-4, 'Cell 1 energy pooled to 80.0');
+assertApprox(poolCell2.energy, 80.0, 1e-4, 'Cell 2 energy pooled to 80.0');
+assertApprox(poolCell3.energy, 80.0, 1e-4, 'Cell 3 energy pooled to 80.0');
+
+// 5. Coordinated Rigid Polar Locomotion & Steering Delegation
+const steerCore = new Creature(300, 300, new Genome({ size: 10, speed: 3.0 }));
+const steerMember = new Creature(300, 300, new Genome({ size: 8, speed: 2.0 }));
+const steerColony = new Colony([steerCore, steerMember]);
+
+// Member delegates steering to colony
+const memberBehavior = steerMember.evaluateBehavior(null);
+assert(memberBehavior.action === 'colony_member', 'Colony member delegates steering behavior');
+assert(steerMember.state === 'colony_member', 'Colony member state set to colony_member');
+
+// Polar lock alignment
+steerCore.position.set(400, 400);
+steerCore.heading = Math.PI / 2;
+steerCore.velocity.set(0, 4);
+steerColony.update(0.05, null);
+
+const expectedMemberAngle = steerCore.heading + steerMember.colonyAngleOffset;
+const expectedX = steerCore.position.x + Math.cos(expectedMemberAngle) * steerMember.colonyDistOffset;
+const expectedY = steerCore.position.y + Math.sin(expectedMemberAngle) * steerMember.colonyDistOffset;
+
+assertApprox(steerMember.position.x, expectedX, 1e-4, 'Member polar X locked to coreCell orientation');
+assertApprox(steerMember.position.y, expectedY, 1e-4, 'Member polar Y locked to coreCell orientation');
+assertApprox(steerMember.heading, steerCore.heading, 1e-4, 'Member heading locked to coreCell');
+assertApprox(steerMember.velocity.x, steerCore.velocity.x, 1e-4, 'Member velocity X aligned with coreCell');
+assertApprox(steerMember.velocity.y, steerCore.velocity.y, 1e-4, 'Member velocity Y aligned with coreCell');
+
+// Member cell update does not drift autonomously
+const posXBefore = steerMember.position.x;
+const posYBefore = steerMember.position.y;
+steerMember.update(0.05, null);
+assertApprox(steerMember.position.x, posXBefore, 1e-4, 'Member cell skips autonomous physics in creature.update()');
+assertApprox(steerMember.position.y, posYBefore, 1e-4, 'Member cell skips autonomous physics in creature.update()');
+
+// 6. Motor Cell Speed Boost
+// 2 cells = 1 motor cell -> 1.0 + 1 * 0.25 = 1.25
+assertApprox(steerColony.speedMultiplier, 1.25, 1e-4, '1 motor cell provides 1.25x speed boost');
+assertApprox(steerCore.colonySpeedMultiplier, 1.25, 1e-4, 'Core cell colonySpeedMultiplier set to 1.25');
+
+// 6 cells = 3 motor cells (Cell 1, 4, 5) -> 1.0 + 3 * 0.25 = 1.75
+testColony.update(0.05, null);
+assertApprox(testColony.speedMultiplier, 1.75, 1e-4, '3 motor cells provide 1.75x speed boost');
+assertApprox(cCell1.colonySpeedMultiplier, 1.75, 1e-4, 'Core cell colonySpeedMultiplier set to 1.75 with 3 motors');
+
+// 7. Armor Cell Damage Reduction (60% Mitigation)
+const unarmoredCreature = new Creature(500, 500, null, 100);
+const dmgInflicted1 = unarmoredCreature.takeDamage(50);
+assertApprox(dmgInflicted1, 50, 1e-4, 'Unarmored creature takes full 50 damage');
+assertApprox(unarmoredCreature.energy, 50, 1e-4, 'Unarmored creature energy reduced by 50');
+
+// Colony with 2 cells has mouth and motor, NO armor
+const noArmorColony = new Colony([new Creature(100, 100, null, 100), new Creature(100, 100, null, 100)]);
+const dmgInflicted2 = noArmorColony.cells[0].takeDamage(50);
+assertApprox(dmgInflicted2, 50, 1e-4, 'Colony without armor cells takes full 50 damage');
+
+// Colony with 3+ cells has armor cells
+const armorCellTarget = testColony.cells[0];
+const initialTargetEnergy = armorCellTarget.energy;
+const dmgInflicted3 = armorCellTarget.takeDamage(50);
+assertApprox(dmgInflicted3, 20, 1e-4, 'Armor cells mitigate 60% damage (50 -> 20)');
+assertApprox(armorCellTarget.energy, initialTargetEnergy - 20, 1e-4, 'Armor protected creature energy reduced by only 20');
+
+// Member cell also protected by colony armor
+const memberTarget = testColony.cells[2];
+const initialMemberEnergy = memberTarget.energy;
+const dmgInflicted4 = memberTarget.takeDamage(40);
+assertApprox(dmgInflicted4, 16, 1e-4, 'Colony member also receives 60% armor damage mitigation (40 -> 16)');
+assertApprox(memberTarget.energy, initialMemberEnergy - 16, 1e-4, 'Colony member energy reduced by only 16');
+
+// Fatal damage still kills protected creature
+const dyingCell = new Creature(600, 600, null, 10);
+const fatalColony = new Colony([new Creature(600, 600), new Creature(600, 600), dyingCell]);
+dyingCell.takeDamage(100);
+assert(!dyingCell.isAlive, 'Lethal damage through armor destroys creature');
+
+// 8. Offshoot Splitting When Colony Saturated (cells >= 6 && totalEnergy > 800)
+const splitColony = new Colony([
+  new Creature(100, 100, null, 200),
+  new Creature(100, 100, null, 200),
+  new Creature(100, 100, null, 200),
+  new Creature(100, 100, null, 200),
+  new Creature(100, 100, null, 200),
+  new Creature(100, 100, null, 200)
+]);
+assert(splitColony.cells.length === 6, 'Colony reaches 6 cells');
+const offshootChild = splitColony.update(0.1, null);
+assert(offshootChild !== null, 'Saturated colony (>800 energy, 6 cells) produces offshoot child');
+assert(offshootChild.colony === null, 'Offshoot child colony reference cleared');
+assert(offshootChild.colonyRole === null, 'Offshoot child colony role cleared');
+assertApprox(offshootChild.energy, 50.0, 1e-4, 'Offshoot child granted 50 starting energy');
+assert(splitColony.cells.length === 5, 'Colony cell count decremented to 5 after split');
+assert(!splitColony.cells.includes(offshootChild), 'Colony no longer contains detached offshoot child');
+
+// Manual splitOffshoot() method test
+const manualOffshoot = splitColony.splitOffshoot();
+assert(manualOffshoot !== null, 'splitOffshoot() returns detached creature');
+assert(manualOffshoot.colony === null, 'manualOffshoot colony reference cleared');
+assertApprox(manualOffshoot.energy, 50.0, 1e-4, 'manualOffshoot granted 50 starting energy');
+assert(splitColony.cells.length === 4, 'Colony cell count decremented to 4');
+
+// 9. Colony Dissolution & Core Reassignment
+// A. Core cell demise reassigns largest living member
+const reassignCol = new Colony([
+  new Creature(100, 100, new Genome({ size: 8 })),
+  new Creature(100, 100, new Genome({ size: 14 })),
+  new Creature(100, 100, new Genome({ size: 11 }))
+]);
+const oldCore = reassignCol.coreCell;
+assert(oldCore.genome.size === 8, 'Initial core cell is first cell added');
+reassignCol.removeCell(oldCore);
+assert(reassignCol.cells.length === 2, 'Colony maintains 2 remaining cells');
+assert(reassignCol.coreCell.genome.size === 14, 'New coreCell reassigned to largest living cell (size 14)');
+assert(reassignCol.coreCell.colonyRole === 'mouth', 'New core cell role set to mouth');
+
+// B. Member demise in 2-cell colony triggers clean dissolution
+const dissolveCell1 = new Creature(200, 200);
+const dissolveCell2 = new Creature(200, 200);
+const dissolveCol = new Colony([dissolveCell1, dissolveCell2]);
+assert(dissolveCell1.colony === dissolveCol && dissolveCell2.colony === dissolveCol, 'Both cells in colony');
+
+// Kill cell 2: onDeath removes it from colony
+dissolveCell2.die('predation');
+assert(dissolveCell2.colony === null, 'Dead cell colony cleared on death');
+assert(dissolveCell1.colony === null, 'Survivor cell colony cleared on dissolution');
+assert(dissolveCell1.colonyRole === null, 'Survivor cell colonyRole cleared on dissolution');
+assert(dissolveCol.cells.length === 0, 'Dissolved colony has 0 cells');
+assert(dissolveCol.coreCell === null, 'Dissolved colony coreCell is null');
+
+// C. update() on single-cell colony dissolves cleanly
+const orphanCell = new Creature(300, 300);
+const singleCol = new Colony();
+singleCol.cells.push(orphanCell);
+orphanCell.colony = singleCol;
+singleCol.coreCell = orphanCell;
+assert(singleCol.update(0.1, null) === null, 'update() returns null on dissolution');
+assert(orphanCell.colony === null, 'Orphan cell colony cleared by update()');
+assert(singleCol.cells.length === 0, 'singleCol cells cleared by update()');
+
+// 10. Canvas Rendering & Differentiated Role Badges
+const renderColony = new Colony([
+  new Creature(100, 100, new Genome({ size: 10 })),
+  new Creature(100, 100, new Genome({ size: 10 })),
+  new Creature(100, 100, new Genome({ size: 10 }))
+]);
+const colonyMockCtx = createMockContext();
+renderColony.draw(colonyMockCtx);
+assert(colonyMockCtx.strokeStyles.includes('rgba(56, 189, 248, 0.45)'), 'Renders cytoplasmic tether bridges rgba(56, 189, 248, 0.45)');
+assert(colonyMockCtx.strokeStyles.includes('rgba(255, 255, 255, 0.6)'), 'Renders inner cytoplasmic canals');
+assert(colonyMockCtx.strokeStyles.includes('rgba(244, 63, 94, 0.85)'), 'Renders mouth role badge ring rgba(244, 63, 94, 0.85)');
+assert(colonyMockCtx.strokeStyles.includes('rgba(148, 163, 184, 0.7)'), 'Renders armor shield arc badge rgba(148, 163, 184, 0.7)');
+assert(colonyMockCtx.strokeStyles.includes('rgba(56, 189, 248, 0.75)'), 'Renders motor flagella badge rgba(56, 189, 248, 0.75)');
+
 
 console.log('--- Testing Piece 2: Creature Physics, Metabolism & AI ---');
 
@@ -1270,16 +1507,105 @@ import('../src/world.js').then(async ({ World }) => {
   assert(mixedWorld.creatures.length > 0, 'World maintains living population across 100 frames');
   let allFiniteState = true;
   for (const c of mixedWorld.creatures) {
-    if (!Number.isFinite(c.position.x) || !Number.isFinite(c.position.y)) allFiniteState = false;
-    if (!Number.isFinite(c.velocity.x) || !Number.isFinite(c.velocity.y)) allFiniteState = false;
-    if (!Number.isFinite(c.energy) || c.energy < 0) allFiniteState = false;
+    if (!Number.isFinite(c.position.x) || !Number.isFinite(c.position.y)) {
+      console.log('FAIL position', c.position);
+      allFiniteState = false;
+    }
+    if (!Number.isFinite(c.velocity.x) || !Number.isFinite(c.velocity.y)) {
+      console.log('FAIL velocity', c.velocity);
+      allFiniteState = false;
+    }
+    if (!Number.isFinite(c.energy) || c.energy < 0) {
+      console.log('FAIL energy', c.energy);
+      allFiniteState = false;
+    }
     if (c.brainType === 'neural' && c.isAlive) {
-      if (!c.lastNeuralInputs || !c.lastNeuralOutputs) allFiniteState = false;
+      if (!c.lastNeuralInputs || !c.lastNeuralOutputs) {
+        console.log('FAIL neural inputs/outputs', c.id, 'colony:', !!c.colony, 'isCore:', c.colony && c.colony.coreCell === c);
+        allFiniteState = false;
+      }
     }
   }
   assert(allFiniteState, 'All surviving creatures maintain finite physics and neural telemetry across 100 frames');
   assert(mixedWorld.creatures.some(c => c.brainType === 'neural'), 'Neural organisms active in mixed ecosystem');
   assert(mixedWorld.creatures.some(c => c.brainType === 'heuristic'), 'Heuristic organisms active in mixed ecosystem');
+
+  // --- Task 6: Multicellular Colony World Integration ---
+  console.log('--- Testing Task 6: Multicellular Colony World Integration ---');
+  const colonyWorld = new World({
+    width: 2000,
+    height: 1500,
+    initialHerbivores: 0,
+    initialCarnivores: 0,
+    initialOmnivores: 0,
+    maxFood: 50
+  });
+
+  assert(Array.isArray(colonyWorld.colonies), 'World initializes colonies array');
+  assert(colonyWorld.colonies.length === 0, 'World initially has 0 colonies');
+
+  // A. Two conspecific cells with high adhesion colliding form a colony
+  const adhA = new Creature(500, 500, new Genome({ adhesion: 0.8, size: 8, speciesId: 'sp_colony_test' }), 100);
+  const adhB = new Creature(512, 500, new Genome({ adhesion: 0.8, size: 8, speciesId: 'sp_colony_test' }), 100);
+  colonyWorld.creatures.push(adhA, adhB);
+  colonyWorld.creatureGrid.insert(adhA);
+  colonyWorld.creatureGrid.insert(adhB);
+
+  colonyWorld.update(0.05);
+
+  assert(colonyWorld.colonies.length === 1, 'World forms 1 colony from colliding high-adhesion conspecifics');
+  assert(adhA.colony === colonyWorld.colonies[0], 'First creature joined world colony');
+  assert(adhB.colony === colonyWorld.colonies[0], 'Second creature joined world colony');
+  assert(colonyWorld.colonies[0].cells.length === 2, 'Colony contains both organisms');
+
+  // B. Third conspecific colliding joins the existing colony
+  const adhC = new Creature(505, 510, new Genome({ adhesion: 0.7, size: 8, speciesId: 'sp_colony_test' }), 100);
+  colonyWorld.creatures.push(adhC);
+  colonyWorld.creatureGrid.insert(adhC);
+
+  colonyWorld.update(0.05);
+  assert(colonyWorld.colonies.length === 1, 'Colony count remains 1 as member joins');
+  assert(adhC.colony === colonyWorld.colonies[0], 'Third creature joined existing colony');
+  assert(colonyWorld.colonies[0].cells.length === 3, 'Colony size expanded to 3');
+
+  // C. Low adhesion organism does NOT form a colony
+  const lowAdhA = new Creature(800, 800, new Genome({ adhesion: 0.2, size: 8, speciesId: 'sp_solo_test' }), 100);
+  const lowAdhB = new Creature(808, 800, new Genome({ adhesion: 0.2, size: 8, speciesId: 'sp_solo_test' }), 100);
+  colonyWorld.creatures.push(lowAdhA, lowAdhB);
+  colonyWorld.creatureGrid.insert(lowAdhA);
+  colonyWorld.creatureGrid.insert(lowAdhB);
+
+  colonyWorld.update(0.05);
+  assert(lowAdhA.colony === null, 'Low adhesion cell does not form colony');
+  assert(lowAdhB.colony === null, 'Low adhesion cell does not form colony');
+
+  // D. Different species with high adhesion do NOT form a colony
+  const diffSpeciesA = new Creature(1000, 1000, new Genome({ adhesion: 0.9, size: 8, speciesId: 'sp_alpha' }), 100);
+  const diffSpeciesB = new Creature(1008, 1000, new Genome({ adhesion: 0.9, size: 8, speciesId: 'sp_beta' }), 100);
+  colonyWorld.creatures.push(diffSpeciesA, diffSpeciesB);
+  colonyWorld.creatureGrid.insert(diffSpeciesA);
+  colonyWorld.creatureGrid.insert(diffSpeciesB);
+
+  colonyWorld.update(0.05);
+  assert(diffSpeciesA.colony === null, 'Different species organism does not join alien colony');
+  assert(diffSpeciesB.colony === null, 'Different species organism does not join alien colony');
+
+  // E. Colony dissolution prunes from world.colonies
+  adhB.die('predation');
+  adhC.die('predation');
+  colonyWorld.update(0.05);
+  assert(colonyWorld.colonies.length === 0, 'Dissolved colony cleanly pruned from world.colonies');
+  assert(adhA.colony === null, 'Survivor cell colony reference cleared in world');
+
+  // F. drawWorldEffects renders colonies without error
+  const renderColWorld = new World({ width: 1000, height: 1000, initialHerbivores: 0, initialCarnivores: 0, initialOmnivores: 0 });
+  const wCell1 = new Creature(200, 200, new Genome({ size: 10, adhesion: 0.8, speciesId: 'sp_draw' }));
+  const wCell2 = new Creature(210, 200, new Genome({ size: 10, adhesion: 0.8, speciesId: 'sp_draw' }));
+  renderColWorld.creatures.push(wCell1, wCell2);
+  renderColWorld.update(0.05);
+  const wMockCtx = createMockContext();
+  renderColWorld.drawWorldEffects(wMockCtx);
+  assert(wMockCtx.strokeStyles.includes('rgba(56, 189, 248, 0.45)'), 'drawWorldEffects successfully renders active colony bridges');
 
   console.log('--- Testing Piece 6: Web Audio Synthesizer Interface ---');
   const { SoundSynthesizer, sound } = await import('../src/audio.js');

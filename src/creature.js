@@ -122,6 +122,14 @@ export class Creature {
     this.hostCreature = null;
     this.parasiteOffsetAngle = 0;
 
+    // Multicellular Colony Dynamics
+    this.colony = null;
+    this.colonyRole = null;
+    this.colonyAngleOffset = 0;
+    this.colonyDistOffset = 0;
+    this.colonySpeedMultiplier = 1.0;
+    this.speedMultiplier = 1.0;
+
     // Dynamic chromatophore phenotypic coloration
     const initialRgb = getInitialGenomeRgb(this.genome);
     this._baseGenomeRgb = { r: initialRgb.r, g: initialRgb.g, b: initialRgb.b };
@@ -606,6 +614,13 @@ export class Creature {
       return { action: 'latched', target: this.hostCreature };
     }
 
+    // Member cells of a colony delegate steering to the colony core cell
+    if (this.colony && this.colony.coreCell !== this) {
+      this.state = 'colony_member';
+      this.currentIntention = `Colony Member (${this.colonyRole || 'cell'})`;
+      return { action: 'colony_member', target: this.colony.coreCell };
+    }
+
     // Cleaner mutualist: seek host with attached parasites
     if (this.isCleaner && env && env.creatureGrid) {
       const infestedCandidates = env.creatureGrid.queryRadius(this.position.x, this.position.y, this.genome.sense, (c) => {
@@ -895,26 +910,31 @@ export class Creature {
       }
     }
 
-    // 1. Evaluate steering AI
-    if (env) {
+    const isColonyMember = this.colony && this.colony.coreCell !== this;
+
+    // 1. Evaluate steering AI (skipped for member cells)
+    if (env && !isColonyMember) {
       this.evaluateBehavior(env);
       const boundaryForce = this.avoidBoundaries(env.worldWidth || 2400, env.worldHeight || 1600);
       this.applyForce(boundaryForce);
     }
 
     // 2. Integrate Physics (Verlet/Euler autonomous movement)
-    this.velocity.add(this.acceleration);
-    const maxSpd = (this.state === 'fleeing') ? this.genome.speed * 1.15 : this.genome.speed;
-    this.velocity.limit(maxSpd);
-    this.position.add(Vector2D.mult(this.velocity, dt * 60.0));
-    this.acceleration.set(0, 0);
+    if (!isColonyMember) {
+      this.velocity.add(this.acceleration);
+      const colonyMult = (this.colony && this.colony.coreCell === this) ? (this.colonySpeedMultiplier ?? this.speedMultiplier ?? 1.0) : 1.0;
+      const maxSpd = ((this.state === 'fleeing') ? this.genome.speed * 1.15 : this.genome.speed) * colonyMult;
+      this.velocity.limit(maxSpd);
+      this.position.add(Vector2D.mult(this.velocity, dt * 60.0));
+      this.acceleration.set(0, 0);
 
-    // Hard boundary clamp safety
-    if (env) {
-      const w = env.worldWidth || 2400;
-      const h = env.worldHeight || 1600;
-      this.position.x = clamp(this.position.x, this.radius, w - this.radius);
-      this.position.y = clamp(this.position.y, this.radius, h - this.radius);
+      // Hard boundary clamp safety
+      if (env) {
+        const w = env.worldWidth || 2400;
+        const h = env.worldHeight || 1600;
+        this.position.x = clamp(this.position.x, this.radius, w - this.radius);
+        this.position.y = clamp(this.position.y, this.radius, h - this.radius);
+      }
     }
 
     // 3. Smooth Heading & Squish Factor
@@ -922,12 +942,14 @@ export class Creature {
     this.distanceTraveled += currentSpeed * dt * 60.0;
 
     if (currentSpeed > 0.05) {
-      const targetHeading = this.velocity.heading();
-      // Smooth angle interpolation
-      let diff = targetHeading - this.heading;
-      while (diff < -Math.PI) diff += Math.PI * 2;
-      while (diff > Math.PI) diff -= Math.PI * 2;
-      this.heading += diff * clamp(dt * 12.0, 0, 1);
+      if (!isColonyMember) {
+        const targetHeading = this.velocity.heading();
+        // Smooth angle interpolation
+        let diff = targetHeading - this.heading;
+        while (diff < -Math.PI) diff += Math.PI * 2;
+        while (diff > Math.PI) diff -= Math.PI * 2;
+        this.heading += diff * clamp(dt * 12.0, 0, 1);
+      }
 
       // Organic tail oscillation
       this.tailWiggle += dt * (this.tailWiggleSpeed + currentSpeed * 2.5);
@@ -1080,7 +1102,7 @@ export class Creature {
           const predatorAttack = this.genome.size * (this.genome.bravery ?? 0.5);
           if (preyDefense > predatorAttack * 0.75) {
             const retaliation = clamp((preyDefense / predatorAttack) * 16, 4, 30);
-            this.energy -= retaliation;
+            this.takeDamage(retaliation);
             if (env && env.addFloatingText) {
               env.addFloatingText(this.position.x, this.position.y - 12, 'DEFENDED!', '#f59e0b');
             }
@@ -1595,6 +1617,25 @@ export class Creature {
   }
 
   /**
+   * Applies damage to this creature, mitigating 60% if protected by colony armor cells.
+   * @param {number} amt Raw incoming damage
+   * @returns {number} Actual damage inflicted
+   */
+  takeDamage(amt) {
+    if (amt <= 0 || !this.isAlive) return 0;
+    let finalDamage = amt;
+    if (this.colony && this.colony.cells.some(c => c.colonyRole === 'armor')) {
+      finalDamage *= 0.40; // 60% damage mitigation
+    }
+    this.energy -= finalDamage;
+    if (this.energy <= 0) {
+      this.energy = 0;
+      this.die('predation');
+    }
+    return finalDamage;
+  }
+
+  /**
    * Handles organism demise, cleanly detaching all symbiotic links.
    * @param {string} [cause='natural'] Cause of death
    */
@@ -1606,13 +1647,16 @@ export class Creature {
   }
 
   /**
-   * Cleans up symbiotic attachments when this organism ceases living.
+   * Cleans up symbiotic attachments and colony membership when this organism ceases living.
    */
   onDeath() {
     if (this.hostCreature) {
       this.detachFromHost();
     }
     this.detachAllParasites();
+    if (this.colony) {
+      this.colony.removeCell(this);
+    }
   }
 
   /**
