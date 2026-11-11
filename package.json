@@ -1,0 +1,20 @@
+{
+  "name": "artificial-life-simulator",
+  "version": "1.0.0",
+  "description": "Artificial Life Simulator - Darwinian natural selection browser sandbox",
+  "type": "module",
+  "scripts": {
+    "test": "node tests/test_simulation.js",
+    "review": "node tests/review_game.js",
+    "build": "node scripts/build_standalone.js"
+  },
+  "keywords": [
+    "artificial-life",
+    "simulation",
+    "evolution",
+    "natural-selection",
+    "primer"
+  ],
+  "author": "",
+  "license": "MIT"
+}

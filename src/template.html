@@ -1,0 +1,866 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Artificial Life Simulator — Primer Natural Selection</title>
+  <style>
+    :root {
+      --bg: #0b0f19;
+      --panel-bg: rgba(15, 23, 42, 0.92);
+      --panel-border: rgba(56, 189, 248, 0.28);
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --green: #22c55e;
+      --red: #ef4444;
+      --amber: #f59e0b;
+      --purple: #a855f7;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body, html {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      user-select: none;
+    }
+
+    #sim-canvas {
+      display: block;
+      width: 100vw;
+      height: 100vh;
+      cursor: crosshair;
+    }
+
+    /* Floating UI Panels */
+    .hud {
+      position: absolute;
+      top: 14px;
+      left: 14px;
+      background: var(--panel-bg);
+      border: 1px solid var(--panel-border);
+      backdrop-filter: blur(12px);
+      border-radius: 10px;
+      padding: 12px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      min-width: 270px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
+      z-index: 10;
+    }
+
+    .hud-title {
+      font-size: 14px;
+      font-weight: 700;
+      color: #fff;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding-bottom: 4px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    }
+    .badge {
+      font-size: 10px;
+      padding: 2px 7px;
+      border-radius: 999px;
+      background: rgba(56, 189, 248, 0.2);
+      color: var(--accent);
+      font-weight: 600;
+    }
+    .badge-climate {
+      background: rgba(245, 158, 11, 0.2);
+      color: var(--amber);
+    }
+
+    .audio-bar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 4px 0;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    }
+    .audio-btn {
+      background: #1e293b;
+      border: 1px solid #334155;
+      color: #fff;
+      font-size: 12px;
+      padding: 2px 8px;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    .vol-slider {
+      flex: 1;
+      height: 4px;
+      accent-color: var(--accent);
+      cursor: pointer;
+    }
+
+    .stats-row {
+      display: flex;
+      justify-content: space-between;
+      font-size: 11px;
+      color: var(--muted);
+    }
+    .stats-row strong {
+      color: #fff;
+    }
+
+    /* Top Center God-Mode Toolbar */
+    .top-toolbar {
+      position: absolute;
+      top: 14px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: var(--panel-bg);
+      border: 1px solid var(--panel-border);
+      backdrop-filter: blur(12px);
+      border-radius: 10px;
+      padding: 6px 12px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
+      z-index: 10;
+    }
+
+    .tool-group {
+      display: flex;
+      gap: 4px;
+    }
+
+    button {
+      background: #1e293b;
+      border: 1px solid #334155;
+      color: #e2e8f0;
+      font-size: 12px;
+      font-weight: 600;
+      padding: 5px 10px;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    button:hover {
+      background: #334155;
+      color: #fff;
+      border-color: var(--accent);
+    }
+    button.active {
+      background: var(--accent);
+      color: #0b0f19;
+      border-color: var(--accent);
+    }
+    button.btn-disaster {
+      border-color: rgba(239, 68, 68, 0.4);
+      color: #f87171;
+    }
+    button.btn-disaster:hover {
+      background: rgba(239, 68, 68, 0.2);
+    }
+
+    select {
+      background: #1e293b;
+      border: 1px solid #334155;
+      color: #e2e8f0;
+      font-size: 12px;
+      font-weight: 600;
+      padding: 5px 10px;
+      border-radius: 6px;
+      cursor: pointer;
+      outline: none;
+    }
+
+    /* Bottom Center Controls */
+    .controls {
+      position: absolute;
+      bottom: 14px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: var(--panel-bg);
+      border: 1px solid var(--panel-border);
+      backdrop-filter: blur(12px);
+      border-radius: 10px;
+      padding: 8px 12px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
+      z-index: 30;
+      flex-wrap: nowrap;
+    }
+
+    /* Left Drawer Inspector */
+    .inspector {
+      position: absolute;
+      top: 175px;
+      left: 14px;
+      background: var(--panel-bg);
+      border: 1px solid var(--panel-border);
+      backdrop-filter: blur(12px);
+      border-radius: 10px;
+      padding: 12px 16px;
+      min-width: 270px;
+      max-width: 310px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
+      z-index: 10;
+      transition: transform 0.2s ease, opacity 0.2s ease;
+      opacity: 0;
+      pointer-events: none;
+      transform: translateX(-15px);
+    }
+    .inspector.open {
+      opacity: 1;
+      pointer-events: auto;
+      transform: translateX(0);
+    }
+    .inspector h3 {
+      font-size: 13px;
+      color: #fff;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      padding-bottom: 4px;
+    }
+    .insp-actions {
+      display: flex;
+      gap: 4px;
+      margin-top: 4px;
+    }
+    .insp-actions button {
+      flex: 1;
+      padding: 4px;
+      font-size: 11px;
+    }
+    .gene-slider-row {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      font-size: 10px;
+      color: var(--muted);
+    }
+    .gene-slider-label {
+      display: flex;
+      justify-content: space-between;
+    }
+    .gene-slider-row input[type="range"] {
+      width: 100%;
+      height: 4px;
+      accent-color: var(--accent);
+      cursor: pointer;
+    }
+
+    /* Environment Tweakers Panel */
+    .env-panel {
+      position: absolute;
+      top: 14px;
+      right: 14px;
+      background: var(--panel-bg);
+      border: 1px solid var(--panel-border);
+      backdrop-filter: blur(12px);
+      border-radius: 10px;
+      padding: 12px 16px;
+      min-width: 250px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
+      z-index: 10;
+      opacity: 0;
+      pointer-events: none;
+      transform: translateY(-10px);
+      transition: all 0.2s ease;
+    }
+    .env-panel.open {
+      opacity: 1;
+      pointer-events: auto;
+      transform: translateY(0);
+    }
+    .env-panel h4 {
+      font-size: 13px;
+      color: #fff;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      padding-bottom: 4px;
+    }
+
+    /* Minimap Radar Bottom-Left */
+    .minimap-card {
+      position: absolute;
+      bottom: 14px;
+      left: 14px;
+      background: var(--panel-bg);
+      border: 1px solid var(--panel-border);
+      backdrop-filter: blur(12px);
+      border-radius: 10px;
+      padding: 4px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
+      z-index: 10;
+      cursor: pointer;
+    }
+    #minimap-canvas {
+      display: block;
+      border-radius: 6px;
+      background: #090e17;
+    }
+
+    /* Primer Evolutionary Analytics Drawer Bottom-Right */
+    .analytics-panel {
+      position: absolute;
+      bottom: 14px;
+      right: 14px;
+      background: var(--panel-bg);
+      border: 1px solid var(--panel-border);
+      backdrop-filter: blur(12px);
+      border-radius: 10px;
+      padding: 10px 14px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
+      z-index: 15;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      transition: transform 0.25s ease;
+    }
+    .analytics-panel.minimized {
+      transform: translateY(calc(100% + 20px));
+    }
+    .analytics-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .analytics-tabs {
+      display: flex;
+      gap: 4px;
+    }
+    .analytics-tab {
+      padding: 3px 8px;
+      font-size: 11px;
+    }
+    #chart-canvas {
+      display: block;
+      border-radius: 6px;
+      background: rgba(11, 15, 25, 0.85);
+      border: 1px solid rgba(255, 255, 255, 0.05);
+    }
+
+    /* Toast Notifications */
+    .toast-container {
+      position: absolute;
+      top: 65px;
+      right: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      z-index: 100;
+      pointer-events: none;
+    }
+    .toast {
+      background: rgba(15, 23, 42, 0.95);
+      border: 1px solid var(--panel-border);
+      border-radius: 6px;
+      padding: 8px 12px;
+      font-size: 11px;
+      color: #fff;
+      box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
+      animation: fadeInOut 3.5s forwards;
+      max-width: 320px;
+    }
+    .toast-extinction { border-color: #f87171; color: #fca5a5; }
+    .toast-speciation { border-color: #38bdf8; color: #bae6fd; }
+    .toast-disaster { border-color: #f59e0b; color: #fde68a; }
+
+    @keyframes fadeInOut {
+      0% { opacity: 0; transform: translateY(-8px); }
+      10% { opacity: 1; transform: translateY(0); }
+      80% { opacity: 1; }
+      100% { opacity: 0; }
+    }
+
+    /* Tutorial Modal & Overlay */
+    .tutorial-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      background: rgba(4, 9, 20, 0.78);
+      backdrop-filter: blur(8px);
+      z-index: 1000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.25s ease;
+    }
+    .tutorial-overlay.open {
+      opacity: 1;
+      pointer-events: auto;
+    }
+    .tutorial-card {
+      background: rgba(15, 23, 42, 0.96);
+      border: 1px solid rgba(56, 189, 248, 0.4);
+      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.8), 0 0 30px rgba(56, 189, 248, 0.2);
+      border-radius: 14px;
+      width: 90%;
+      max-width: 580px;
+      padding: 24px;
+      color: #e2e8f0;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      transform: translateY(12px) scale(0.98);
+      transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .tutorial-overlay.open .tutorial-card {
+      transform: translateY(0) scale(1);
+    }
+    .tut-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      padding-bottom: 10px;
+    }
+    .tut-title-wrap {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .tut-icon {
+      font-size: 22px;
+      background: rgba(56, 189, 248, 0.15);
+      border: 1px solid rgba(56, 189, 248, 0.3);
+      width: 38px;
+      height: 38px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 8px;
+    }
+    .tut-title {
+      font-size: 17px;
+      font-weight: 700;
+      color: #fff;
+    }
+    .tut-step-badge {
+      font-size: 11px;
+      color: var(--accent);
+      background: rgba(56, 189, 248, 0.15);
+      padding: 3px 8px;
+      border-radius: 999px;
+      font-weight: 600;
+    }
+    .tut-close {
+      background: transparent;
+      border: none;
+      color: var(--muted);
+      font-size: 18px;
+      cursor: pointer;
+      padding: 4px 8px;
+      border-radius: 6px;
+    }
+    .tut-close:hover {
+      color: #fff;
+      background: rgba(255, 255, 255, 0.1);
+    }
+    .tut-body {
+      font-size: 13px;
+      line-height: 1.6;
+      color: #cbd5e1;
+      min-height: 180px;
+    }
+    .tut-body h4 {
+      color: #fff;
+      font-size: 14px;
+      margin-bottom: 8px;
+    }
+    .tut-body p {
+      margin-bottom: 10px;
+    }
+    .tut-card-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin: 10px 0;
+    }
+    .tut-mini-box {
+      background: rgba(30, 41, 59, 0.7);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 8px;
+      padding: 10px;
+    }
+    .tut-mini-box strong {
+      display: block;
+      color: #fff;
+      font-size: 12px;
+      margin-bottom: 4px;
+    }
+    .tut-callout {
+      background: rgba(56, 189, 248, 0.1);
+      border-left: 3px solid var(--accent);
+      padding: 8px 12px;
+      border-radius: 0 6px 6px 0;
+      font-size: 12px;
+      margin-top: 10px;
+      color: #e0f2fe;
+    }
+    .tut-footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-top: 1px solid rgba(255, 255, 255, 0.08);
+      padding-top: 12px;
+    }
+    .tut-dots {
+      display: flex;
+      gap: 6px;
+    }
+    .tut-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #334155;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .tut-dot.active {
+      background: var(--accent);
+      width: 18px;
+      border-radius: 4px;
+    }
+    .tut-buttons {
+      display: flex;
+      gap: 8px;
+    }
+    .tut-btn {
+      background: #1e293b;
+      border: 1px solid #334155;
+      color: #fff;
+      padding: 6px 14px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .tut-btn:hover:not(:disabled) {
+      background: #334155;
+    }
+    .tut-btn-primary {
+      background: var(--accent);
+      color: #0b0f19;
+      border: none;
+    }
+    .tut-btn-primary:hover {
+      background: #7dd3fc;
+    }
+    .tut-btn:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+    .tut-checkbox-label {
+      font-size: 11px;
+      color: var(--muted);
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="sim-canvas"></canvas>
+
+  <div class="toast-container" id="toast-container"></div>
+
+  <!-- HUD Panel -->
+  <div class="hud">
+    <div class="hud-title">
+      <span>Natural Selection</span>
+      <div style="display: flex; gap: 4px;">
+        <span class="badge" id="season-badge">Spring</span>
+        <span class="badge badge-climate" id="climate-badge">20°C</span>
+      </div>
+    </div>
+    <div class="audio-bar">
+      <button class="audio-btn" id="btn-help-tutorial" title="Open Interactive Tutorial (Hotkey: T or H)">❓ Tutorial</button>
+      <button class="audio-btn" id="btn-dna-lab" title="Open DNA Synthesizer Lab">🧬 DNA Lab</button>
+      <button class="audio-btn" id="btn-save-sim" title="Save World Simulation State">💾 Save</button>
+      <button class="audio-btn" id="btn-load-sim" title="Load World Simulation State">📂 Load</button>
+      <input type="file" id="file-load-sim" accept=".json" style="display: none;" />
+      <button class="audio-btn" id="btn-audio-mute" title="Toggle Sound Mute">🔊</button>
+      <input type="range" class="vol-slider" id="slider-volume" min="0" max="1" step="0.05" value="0.5" title="Volume">
+      <button id="btn-env-toggle" style="padding: 2px 6px; font-size: 10px;">⚙️ Tweakers</button>
+    </div>
+    <div class="stats-row"><span>Circadian Time:</span><strong id="stat-time-clock" style="color: #facc15;">☀️ Day 1 12:00</strong></div>
+    <div class="stats-row"><span>Organisms:</span><strong id="stat-creatures">0</strong></div>
+    <div class="stats-row"><span>Herbivores:</span><strong id="stat-herbivores" style="color: #4ade80;">0</strong></div>
+    <div class="stats-row"><span>Carnivores / Omnivores:</span><strong id="stat-carnivores" style="color: #f87171;">0</strong></div>
+    <div class="stats-row"><span>Food Pellets:</span><strong id="stat-food" style="color: #22c55e;">0</strong></div>
+    <div class="stats-row"><span>Active Species:</span><strong id="stat-species" style="color: #38bdf8;">0</strong></div>
+    <div class="stats-row"><span>Shannon Diversity H':</span><strong id="stat-shannon" style="color: #a855f7;">0.00</strong></div>
+    <div class="stats-row"><span>FPS:</span><strong id="stat-fps">60</strong></div>
+  </div>
+
+  <!-- Environment Tweakers Panel -->
+  <div class="env-panel" id="env-panel">
+    <h4>
+      <span>Environment Tweakers</span>
+      <button id="btn-env-close" style="padding: 1px 5px; font-size: 9px;">✕</button>
+    </h4>
+    <div class="gene-slider-row">
+      <div class="gene-slider-label"><span>Food Growth Rate</span><span id="env-food-val">1.0x</span></div>
+      <input type="range" id="env-slider-food" min="0.2" max="3.0" step="0.1" value="1.0">
+    </div>
+    <div class="gene-slider-row">
+      <div class="gene-slider-label"><span>Mutation Multiplier</span><span id="env-mut-val">1.0x</span></div>
+      <input type="range" id="env-slider-mut" min="0.2" max="4.0" step="0.2" value="1.0">
+    </div>
+    <div class="gene-slider-row">
+      <div class="gene-slider-label"><span>Kinetic Cost Multiplier</span><span id="env-kinetic-val">1.0x</span></div>
+      <input type="range" id="env-slider-kinetic" min="0.5" max="3.0" step="0.1" value="1.0">
+    </div>
+    <div class="gene-slider-row">
+      <div class="gene-slider-label"><span>Temp Override (-5°C to 45°C)</span><span id="env-temp-val">Auto</span></div>
+      <input type="range" id="env-slider-temp" min="-5" max="45" step="1" value="20">
+      <button id="btn-temp-auto" style="width: 100%; margin-top: 4px; padding: 2px;">Reset to Auto Climate</button>
+    </div>
+    <div class="gene-slider-row" style="margin-top: 8px; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 6px;">
+      <label style="font-size: 11px; display: flex; align-items: center; gap: 6px; cursor: pointer; color: #e2e8f0;">
+        <input type="checkbox" id="chk-death-msgs" checked>
+        <span>Death & Extinction Alerts</span>
+      </label>
+    </div>
+    <div class="gene-slider-row" style="margin-top: 4px;">
+      <label style="font-size: 11px; display: flex; align-items: center; gap: 6px; cursor: pointer; color: #e2e8f0;">
+        <input type="checkbox" id="chk-pheromones" checked>
+        <span>Pheromone Scent Trails</span>
+      </label>
+    </div>
+  </div>
+
+  <!-- Top Center God-Mode Toolbar -->
+  <div class="top-toolbar">
+    <select id="preset-select">
+      <option value="cambrian_explosion">Preset: Cambrian Explosion</option>
+      <option value="apex_predator">Preset: Apex Predator Invasion</option>
+      <option value="famine_scarcity">Preset: Famine & Scarcity</option>
+      <option value="hyper_mutation">Preset: Hyper-Mutation Chaos</option>
+      <option value="challenge_speed_trap">Challenge: The Speed Trap</option>
+      <option value="challenge_darwin_finches">Challenge: Darwin's Finches</option>
+    </select>
+
+    <div class="tool-group">
+      <button id="tool-select" class="active">Select</button>
+      <button id="tool-food">Food Brush</button>
+      <button id="tool-herbivore">+ Herbivore</button>
+      <button id="tool-carnivore">+ Carnivore</button>
+      <button id="tool-omnivore">+ Omnivore</button>
+      <button id="tool-smite" class="btn-disaster">Smite / Cull</button>
+    </div>
+  </div>
+
+  <!-- Main Controls Bottom Center -->
+  <div class="controls">
+    <button id="btn-pause">Pause</button>
+    <button id="btn-speed-1" class="active">1x</button>
+    <button id="btn-speed-2">2x</button>
+    <button id="btn-speed-5">5x</button>
+    <button id="btn-reset">Reset</button>
+    <button id="btn-toggle-grid">Grid</button>
+    <button id="btn-toggle-sense">Perception</button>
+    <button id="btn-toggle-death" class="active" title="Toggle Death & Extinction Alerts (Hotkey: D or M)">Death Msgs: ON</button>
+    <button id="btn-meteor" class="btn-disaster">Meteor</button>
+    <button id="btn-epidemic" class="btn-disaster">Epidemic</button>
+    <button id="btn-toggle-charts" class="active">Analytics</button>
+  </div>
+
+  <!-- Creature Inspector -->
+  <div class="inspector" id="inspector">
+    <h3>
+      <span id="insp-name">Creature #1</span>
+      <button id="insp-close" style="padding: 1px 5px; font-size: 10px;">✕</button>
+    </h3>
+    <div class="stats-row"><span>Species:</span><strong id="insp-species">sp_1</strong></div>
+    <div class="stats-row"><span>State:</span><strong id="insp-state">Wandering</strong></div>
+    <div class="stats-row"><span>Intention:</span><strong id="insp-intention" style="color: #38bdf8;">Exploring Habitat</strong></div>
+    <div class="stats-row"><span>Lineage:</span><strong id="insp-lineage">Gen 1 (Wild)</strong></div>
+    <div class="stats-row"><span>Energy:</span><strong id="insp-energy">100 / 200</strong></div>
+    <div class="stats-row"><span>Age / Lifespan:</span><strong id="insp-age">12s / 80s</strong></div>
+    <div class="stats-row"><span>Offspring:</span><strong id="insp-offspring">0</strong></div>
+    <div class="stats-row"><span>Kills / Plants:</span><strong id="insp-diet-stat">0 / 0</strong></div>
+
+    <!-- Inspector Action Buttons -->
+    <div class="insp-actions">
+      <button id="btn-follow-creature">Follow: OFF</button>
+      <button id="btn-possess-creature" style="color: #38bdf8;" title="Control this organism directly with WASD (Hotkey: E)">Possess: OFF</button>
+      <button id="btn-clone-dna-lab" style="color: #c084fc;" title="Copy this organism's DNA into the Genetic Lab">Clone to Lab</button>
+      <button id="btn-feed-creature" style="color: #4ade80;">+50 Energy</button>
+      <button id="btn-kill-creature" style="color: #f87171;">Smite</button>
+    </div>
+
+    <hr style="border: none; border-top: 1px solid #334155; margin: 6px 0;">
+
+    <div class="gene-slider-row">
+      <div class="gene-slider-label"><span>Speed</span><span id="insp-speed-val">2.2</span></div>
+      <input type="range" id="insp-slider-speed" min="0.8" max="4.8" step="0.1" value="2.2">
+    </div>
+    <div class="gene-slider-row">
+      <div class="gene-slider-label"><span>Sense Radius</span><span id="insp-sense-val">75</span></div>
+      <input type="range" id="insp-slider-sense" min="25" max="220" step="2" value="75">
+    </div>
+    <div class="gene-slider-row">
+      <div class="gene-slider-label"><span>Body Size</span><span id="insp-size-val">8.5</span></div>
+      <input type="range" id="insp-slider-size" min="4" max="22" step="0.5" value="8.5">
+    </div>
+    <div class="gene-slider-row">
+      <div class="gene-slider-label"><span>Diet (Herbivore &rarr; Carnivore)</span><span id="insp-diet-val">0.2</span></div>
+      <input type="range" id="insp-slider-diet" min="0" max="1" step="0.02" value="0.2">
+    </div>
+    <div class="gene-slider-row">
+      <div class="gene-slider-label"><span>Armor / Carapace</span><span id="insp-armor-val">0.2</span></div>
+      <input type="range" id="insp-slider-armor" min="0" max="1" step="0.05" value="0.2">
+    </div>
+    <div class="gene-slider-row">
+      <div class="gene-slider-label"><span>Nocturnal Affinity</span><span id="insp-nocturnal-val">0.2</span></div>
+      <input type="range" id="insp-slider-nocturnal" min="0" max="1" step="0.05" value="0.2">
+    </div>
+    <div class="gene-slider-row">
+      <div class="gene-slider-label"><span>Bravery</span><span id="insp-bravery-val">0.5</span></div>
+      <input type="range" id="insp-slider-bravery" min="0" max="1" step="0.05" value="0.5">
+    </div>
+  </div>
+
+  <!-- Minimap Radar Bottom Left -->
+  <div class="minimap-card">
+    <canvas id="minimap-canvas" width="180" height="115"></canvas>
+  </div>
+
+  <!-- Primer Evolutionary Analytics Panel Bottom Right -->
+  <div class="analytics-panel" id="analytics-panel">
+    <div class="analytics-header">
+      <div class="analytics-tabs">
+        <button class="analytics-tab active" data-tab="histograms">Trait Distributions</button>
+        <button class="analytics-tab" data-tab="scatter">Phase Space (Speed/Sense)</button>
+        <button class="analytics-tab" data-tab="population">Pop Trends</button>
+        <button class="analytics-tab" data-tab="evolution">Trait Evolution</button>
+        <button class="analytics-tab" data-tab="diversity">Diversity & Clades</button>
+        <button class="analytics-tab" data-tab="fossils">Fossils & Lineage</button>
+      </div>
+      <button id="analytics-close" style="padding: 2px 6px; font-size: 10px;">✕</button>
+    </div>
+    <canvas id="chart-canvas" width="486" height="230"></canvas>
+  </div>
+
+  <!-- Tutorial Overlay -->
+  <div class="tutorial-overlay" id="tutorial-overlay">
+    <div class="tutorial-card">
+      <div class="tut-header">
+        <div class="tut-title-wrap">
+          <div class="tut-icon" id="tut-icon">🧬</div>
+          <div>
+            <div class="tut-title" id="tut-title">Welcome to Artificial Life Simulator</div>
+            <span class="tut-step-badge" id="tut-step-badge">Step 1 of 6</span>
+          </div>
+        </div>
+        <button class="tut-close" id="tut-close" title="Close Tutorial">✕</button>
+      </div>
+
+      <div class="tut-body" id="tut-body">
+        <!-- Dynamically populated step content -->
+      </div>
+
+      <div class="tut-footer">
+        <label class="tut-checkbox-label">
+          <input type="checkbox" id="tut-dont-show"> Don't show again on launch
+        </label>
+        <div class="tut-dots" id="tut-dots">
+          <div class="tut-dot active" data-step="0"></div>
+          <div class="tut-dot" data-step="1"></div>
+          <div class="tut-dot" data-step="2"></div>
+          <div class="tut-dot" data-step="3"></div>
+          <div class="tut-dot" data-step="4"></div>
+          <div class="tut-dot" data-step="5"></div>
+        </div>
+        <div class="tut-buttons">
+          <button class="tut-btn" id="tut-prev" disabled>Back</button>
+          <button class="tut-btn tut-btn-primary" id="tut-next">Next &rarr;</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- DNA Synthesizer & Genetic Lab Modal -->
+  <div class="tutorial-overlay" id="dna-modal">
+    <div class="tutorial-card" style="max-width: 640px;">
+      <div class="tut-header">
+        <div class="tut-title-wrap">
+          <div class="tut-icon">🧬</div>
+          <div>
+            <div class="tut-title">DNA Synthesizer & Genetic Lab</div>
+            <span class="tut-step-badge">Morphological Designer</span>
+          </div>
+        </div>
+        <button class="tut-close" id="dna-close">✕</button>
+      </div>
+      <div style="display: flex; gap: 16px; margin: 10px 0;">
+        <!-- Canvas Preview -->
+        <div style="background: #0b0f19; border: 1px solid #334155; border-radius: 8px; padding: 10px; display: flex; flex-direction: column; align-items: center; justify-content: center; width: 190px;">
+          <canvas id="dna-preview-canvas" width="160" height="160"></canvas>
+          <div id="dna-archetype-label" style="font-size: 11px; font-weight: bold; margin-top: 6px; color: #4ade80;">HERBIVORE</div>
+        </div>
+        <!-- Sliders -->
+        <div style="flex: 1; display: flex; flex-direction: column; gap: 6px; font-size: 11px;">
+          <div class="gene-slider-row">
+            <div class="gene-slider-label"><span>Speed</span><span id="dna-spd-val">2.2</span></div>
+            <input type="range" id="dna-slider-speed" min="0.8" max="4.8" step="0.1" value="2.2">
+          </div>
+          <div class="gene-slider-row">
+            <div class="gene-slider-label"><span>Sense Radius</span><span id="dna-sns-val">75</span></div>
+            <input type="range" id="dna-slider-sense" min="25" max="220" step="2" value="75">
+          </div>
+          <div class="gene-slider-row">
+            <div class="gene-slider-label"><span>Body Size</span><span id="dna-sz-val">8.5</span></div>
+            <input type="range" id="dna-slider-size" min="4" max="22" step="0.5" value="8.5">
+          </div>
+          <div class="gene-slider-row">
+            <div class="gene-slider-label"><span>Diet (Herbivore &rarr; Carnivore)</span><span id="dna-dt-val">0.15</span></div>
+            <input type="range" id="dna-slider-diet" min="0" max="1" step="0.02" value="0.15">
+          </div>
+          <div class="gene-slider-row">
+            <div class="gene-slider-label"><span>Armor & Carapace</span><span id="dna-arm-val">0.2</span></div>
+            <input type="range" id="dna-slider-armor" min="0" max="1" step="0.05" value="0.2">
+          </div>
+          <div class="gene-slider-row">
+            <div class="gene-slider-label"><span>Nocturnal Affinity</span><span id="dna-noc-val">0.2</span></div>
+            <input type="range" id="dna-slider-nocturnal" min="0" max="1" step="0.05" value="0.2">
+          </div>
+        </div>
+      </div>
+      <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 10px;">
+        <div style="display: flex; gap: 6px;">
+          <button class="audio-btn" id="dna-preset-herb">🌿 Herb</button>
+          <button class="audio-btn" id="dna-preset-carn">🥩 Carn</button>
+          <button class="audio-btn" id="dna-preset-omni">🟣 Omni</button>
+          <button class="audio-btn" id="dna-preset-titan" style="color: #f59e0b;">👑 Titan</button>
+        </div>
+        <button class="tut-btn tut-btn-primary" id="btn-dna-spawn">Spawn in World (x3)</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- SCRIPT_PLACEHOLDER -->
+</body>
+</html>
