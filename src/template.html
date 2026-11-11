@@ -578,6 +578,83 @@
       gap: 5px;
       cursor: pointer;
     }
+
+    /* Arena Tournament HUD Overlay */
+    .arena-hud {
+      position: absolute;
+      top: 68px;
+      left: 50%;
+      transform: translateX(-50%) translateY(-10px);
+      background: rgba(15, 23, 42, 0.94);
+      border: 1px solid rgba(244, 63, 94, 0.55);
+      backdrop-filter: blur(12px);
+      border-radius: 12px;
+      padding: 12px 18px;
+      min-width: 390px;
+      max-width: 520px;
+      box-shadow: 0 12px 35px rgba(0, 0, 0, 0.75), 0 0 25px rgba(244, 63, 94, 0.2);
+      z-index: 25;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      opacity: 0;
+      pointer-events: none;
+      transition: all 0.2s ease;
+    }
+    .arena-hud.open {
+      opacity: 1;
+      pointer-events: auto;
+      transform: translateX(-50%) translateY(0);
+    }
+    .arena-hud-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid rgba(244, 63, 94, 0.25);
+      padding-bottom: 6px;
+    }
+    .arena-hud-title {
+      font-size: 13px;
+      font-weight: 700;
+      color: #fda4af;
+      letter-spacing: 0.4px;
+    }
+    .arena-leaderboard {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      font-size: 11px;
+    }
+    .arena-clade-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: rgba(30, 41, 59, 0.65);
+      padding: 4px 8px;
+      border-radius: 5px;
+      border-left: 3px solid #38bdf8;
+    }
+    .arena-winner-banner {
+      display: none;
+      background: linear-gradient(90deg, rgba(245, 158, 11, 0.22), rgba(244, 63, 94, 0.22));
+      border: 1px solid rgba(245, 158, 11, 0.6);
+      color: #fef08a;
+      font-size: 12px;
+      font-weight: 700;
+      text-align: center;
+      padding: 6px 10px;
+      border-radius: 6px;
+    }
+    .arena-winner-banner.visible {
+      display: block;
+    }
+    .arena-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      padding-top: 4px;
+      border-top: 1px solid rgba(255, 255, 255, 0.08);
+    }
   </style>
 </head>
 <body>
@@ -597,6 +674,7 @@
     <div class="audio-bar">
       <button class="audio-btn" id="btn-help-tutorial" title="Open Interactive Tutorial (Hotkey: T or H)">❓ Tutorial</button>
       <button class="audio-btn" id="btn-dna-lab" title="Open DNA Synthesizer Lab">🧬 DNA Lab</button>
+      <button class="audio-btn" id="btn-arena-mode" title="Launch Species Arena Battle Royale" style="border-color: #f43f5e; color: #fda4af;">⚔️ Arena</button>
       <button class="audio-btn" id="btn-save-sim" title="Save World Simulation State">💾 Save</button>
       <button class="audio-btn" id="btn-load-sim" title="Load World Simulation State">📂 Load</button>
       <input type="file" id="file-load-sim" accept=".json" style="display: none;" />
@@ -672,6 +750,20 @@
     </div>
   </div>
 
+  <!-- Arena Battle Royale Tournament HUD -->
+  <div class="arena-hud" id="arena-hud">
+    <div class="arena-hud-header">
+      <span class="arena-hud-title">⚔️ SPECIES ARENA BATTLE ROYALE</span>
+      <span class="badge" id="arena-timer-stat" style="background: rgba(244, 63, 94, 0.2); color: #fda4af;">Storm: 1200px | 00:00</span>
+    </div>
+    <div class="arena-leaderboard" id="arena-leaderboard"></div>
+    <div class="arena-winner-banner" id="arena-winner-banner"></div>
+    <div class="arena-actions">
+      <button id="btn-arena-rematch">🔄 Rematch</button>
+      <button id="btn-arena-exit" class="btn-disaster">🚪 Exit to Sandbox</button>
+    </div>
+  </div>
+
   <!-- Main Controls Bottom Center -->
   <div class="controls">
     <button id="btn-pause">Pause</button>
@@ -701,6 +793,15 @@
     <div class="stats-row"><span>Age / Lifespan:</span><strong id="insp-age">12s / 80s</strong></div>
     <div class="stats-row"><span>Offspring:</span><strong id="insp-offspring">0</strong></div>
     <div class="stats-row"><span>Kills / Plants:</span><strong id="insp-diet-stat">0 / 0</strong></div>
+    <div class="stats-row"><span>Brain:</span><strong id="insp-brain-type" style="color: #c084fc; cursor: pointer;" title="Click to toggle Neural / Heuristic">NEURAL (124 syn)</strong></div>
+
+    <div class="brain-viz-box" style="margin-top: 4px; border: 1px solid rgba(255,255,255,0.1); border-radius: 6px; overflow: hidden; background: rgba(15, 23, 42, 0.7);">
+      <div style="font-size: 9px; color: #94a3b8; padding: 3px 6px; display: flex; justify-content: space-between; border-bottom: 1px solid rgba(255,255,255,0.06);">
+        <span>LIVE NEURAL TOPOLOGY (10→8→4)</span>
+        <span id="insp-brain-Summary">Active</span>
+      </div>
+      <canvas id="insp-brain-canvas" width="268" height="165" style="display: block; width: 100%; height: 165px;"></canvas>
+    </div>
 
     <!-- Inspector Action Buttons -->
     <div class="insp-actions">

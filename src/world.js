@@ -9,6 +9,7 @@ import { SpatialGrid } from './spatialGrid.js';
 import { FoodManager } from './food.js';
 import { Genome } from './genome.js';
 import { Creature } from './creature.js';
+import { Colony } from './colony.js';
 
 let NEXT_DISASTER_ID = 1;
 
@@ -39,6 +40,9 @@ export class World {
 
     /** @type {Creature[]} */
     this.creatures = [];
+
+    /** @type {Colony[]} */
+    this.colonies = [];
 
     // Ecosystem & Climate Dynamics
     this.time = 0; // Simulation time in seconds
@@ -185,6 +189,7 @@ export class World {
    */
   populateInitial(herbivores, carnivores, omnivores) {
     this.creatures = [];
+    this.colonies = [];
     this.creatureGrid.clear();
     this.speciesRegistry.clear();
 
@@ -229,6 +234,7 @@ export class World {
    */
   loadPreset(presetName) {
     this.creatures = [];
+    this.colonies = [];
     this.creatureGrid.clear();
     this.foodManager.clear();
     this.speciesRegistry.clear();
@@ -754,8 +760,12 @@ export class World {
 
       if (damageFactor > 0.45) {
         // Direct incineration / lethal blast
-        c.isAlive = false;
-        c.causeOfDeath = 'disaster';
+        if (typeof c.die === 'function') {
+          c.die('disaster');
+        } else {
+          c.isAlive = false;
+          c.causeOfDeath = 'disaster';
+        }
         casualties++;
         // Drop charred meat
         this.foodManager.spawnMeat(c.position, c.genome.size * 5, c.genome.size);
@@ -811,8 +821,12 @@ export class World {
       if (roll < virulence) {
         c.energy *= 0.35;
         if (roll < virulence * 0.6) {
-          c.isAlive = false;
-          c.causeOfDeath = 'epidemic';
+          if (typeof c.die === 'function') {
+            c.die('epidemic');
+          } else {
+            c.isAlive = false;
+            c.causeOfDeath = 'epidemic';
+          }
           victims++;
           this.foodManager.spawnMeat(c.position, c.genome.size * 6, c.genome.size);
         }
@@ -968,6 +982,7 @@ export class World {
       mutationMultiplier: this.mutationMultiplier,
       isNight: this.isNight,
       solarIntensity: this.solarIntensity,
+      getBiomeAt: (x, y) => this.getBiomeAt(x, y),
       addPheromone: (x, y, t, s, d) => this.addPheromone(x, y, t, s, d),
       addFloatingText: (x, y, txt, col) => this.addFloatingText(x, y, txt, col)
     };
@@ -1011,6 +1026,9 @@ export class World {
       }
 
       if (!c.isAlive) {
+        if (typeof c.onDeath === 'function') {
+          c.onDeath();
+        }
         this.creatureGrid.remove(c);
         // Spawn decaying carcass if died naturally or of famine
         if (c.causeOfDeath !== 'predation' && c.causeOfDeath !== 'disaster') {
@@ -1046,6 +1064,64 @@ export class World {
       this.creatureGrid.insert(child);
       this.registerCreatureSpecies(child, child.genome.speciesId);
     }
+
+    // 5.5 Multicellular Colony Formation & Coordination
+    for (let i = 0; i < this.creatures.length; i++) {
+      const c = this.creatures[i];
+      if (!c.isAlive) continue;
+      if ((c.genome?.adhesion ?? 0) < 0.5) continue;
+      if (c.colony && c.colony.cells.length >= 6) continue;
+
+      let candidates = [];
+      if (this.creatureGrid) {
+        candidates = this.creatureGrid.queryRadius(c.position.x, c.position.y, c.radius + 35, (other) => {
+          return other !== c && other.isAlive && (other.genome?.adhesion ?? 0) >= 0.5;
+        });
+      }
+      if (candidates.length === 0 && this.creatures.length < 500) {
+        candidates = this.creatures.filter(other => {
+          if (other === c || !other.isAlive || (other.genome?.adhesion ?? 0) < 0.5) return false;
+          const rSum = c.radius + other.radius + 6;
+          return c.position.distSq(other.position) <= rSum * rSum;
+        });
+      }
+
+      for (const other of candidates) {
+        if (c.colony && c.colony === other.colony) continue;
+        if (c.colony && other.colony) continue;
+        if (other.colony && other.colony.cells.length >= 6) continue;
+
+        const isConspecific = (c.genome?.speciesId && other.genome?.speciesId)
+          ? (c.genome.speciesId === other.genome.speciesId)
+          : (c.genome?.geneticDistance && other.genome && c.genome.geneticDistance(other.genome) <= 0.28);
+        if (!isConspecific) continue;
+
+        const contactDist = c.radius + other.radius + 6;
+        if (c.position.distSq(other.position) <= contactDist * contactDist) {
+          if (!c.colony && !other.colony) {
+            const newColony = new Colony([c, other]);
+            this.colonies.push(newColony);
+            break;
+          } else if (c.colony && !other.colony) {
+            c.colony.addCell(other);
+            break;
+          } else if (!c.colony && other.colony) {
+            other.colony.addCell(c);
+            break;
+          }
+        }
+      }
+    }
+
+    // Update all active colonies & prune dissolved ones
+    for (let i = this.colonies.length - 1; i >= 0; i--) {
+      const col = this.colonies[i];
+      const offshoot = col.update(dt, env);
+      if (offshoot && env && env.addFloatingText) {
+        env.addFloatingText(offshoot.position.x, offshoot.position.y - 14, 'OFFSHOOT!', '#38bdf8');
+      }
+    }
+    this.colonies = this.colonies.filter(c => c.cells.length > 1);
 
     // 6. Natural Lotka-Volterra density stabilization: prevent total ecosystem collapse
     if (this.creatures.length < 12) {
@@ -1121,6 +1197,13 @@ export class World {
         ctx.fillText(ft.text, ft.x, ft.y);
       }
       ctx.restore();
+    }
+
+    // 4. Multicellular Colony Bridges and Badges
+    if (this.colonies && this.colonies.length > 0) {
+      for (const col of this.colonies) {
+        col.draw(ctx);
+      }
     }
   }
 }

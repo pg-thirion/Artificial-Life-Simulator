@@ -1,9 +1,15 @@
+import { NeuralVisualizer } from './neuralVisualizer.js';
+import { ArenaTournament } from './arena.js';
+
 // Canvases
 const canvas = document.getElementById('sim-canvas');
 const ctx = canvas.getContext('2d');
 
 const chartCanvas = document.getElementById('chart-canvas');
 const chartManager = new ChartManager(chartCanvas);
+
+const brainCanvas = document.getElementById('insp-brain-canvas');
+const neuralVisualizer = new NeuralVisualizer(brainCanvas);
 
 const minimapCanvas = document.getElementById('minimap-canvas');
 const miniCtx = minimapCanvas.getContext('2d');
@@ -29,6 +35,8 @@ let world = new World({
   maxFood: 420,
   showDeathMessages: true
 });
+
+const arena = new ArenaTournament(world);
 
 let camera = {
   x: WORLD_WIDTH / 2 - width / 2,
@@ -333,6 +341,16 @@ document.getElementById('btn-kill-creature').onclick = () => {
   }
 };
 
+const inspBrainTypeEl = document.getElementById('insp-brain-type');
+if (inspBrainTypeEl) {
+  inspBrainTypeEl.onclick = () => {
+    if (!selectedCreature || !selectedCreature.isAlive) return;
+    selectedCreature.brainType = selectedCreature.brainType === 'neural' ? 'heuristic' : 'neural';
+    updateInspectorUI();
+    showToast(`Creature #${selectedCreature.id} switched to ${selectedCreature.brainType.toUpperCase()} brain`, 'speciation');
+  };
+}
+
 // Live Gene Modifiers
 const geneSliders = {
   speed: document.getElementById('insp-slider-speed'),
@@ -378,6 +396,22 @@ function updateInspectorUI() {
   document.getElementById('insp-age').textContent = `${Math.round(c.age)}s / ${Math.round(c.lifespan)}s`;
   document.getElementById('insp-offspring').textContent = c.offspringCount;
   document.getElementById('insp-diet-stat').textContent = `${c.kills} / ${c.plantsEaten}`;
+
+  const brainTypeBadge = document.getElementById('insp-brain-type');
+  if (brainTypeBadge) {
+    if (c.brainType === 'neural') {
+      brainTypeBadge.textContent = 'NEURAL (124 syn)';
+      brainTypeBadge.style.color = '#c084fc';
+    } else {
+      brainTypeBadge.textContent = 'HEURISTIC (Rule)';
+      brainTypeBadge.style.color = '#38bdf8';
+    }
+  }
+  const brainSummaryEl = document.getElementById('insp-brain-Summary');
+  if (brainSummaryEl) {
+    brainSummaryEl.textContent = c.brainType === 'neural' ? 'Active' : 'Rule Mode';
+  }
+  neuralVisualizer.render(c.brain, c.brainType);
 
   if (btnPossess) {
     btnPossess.textContent = c.isPossessed ? 'Possess: ON' : 'Possess: OFF';
@@ -793,8 +827,89 @@ requestAnimationFrame(drawDnaPreview);
 
 // Expose on window for tests & developer console
 window.alsWorld = world;
+window.alsArena = arena;
 window.alsCamera = camera;
 window.alsSelectCreature = selectCreature;
+
+// Arena Battle Royale UI Controller
+const arenaHudEl = document.getElementById('arena-hud');
+const arenaTimerStatEl = document.getElementById('arena-timer-stat');
+const arenaLeaderboardEl = document.getElementById('arena-leaderboard');
+const arenaWinnerBannerEl = document.getElementById('arena-winner-banner');
+const btnArenaMode = document.getElementById('btn-arena-mode');
+const btnArenaRematch = document.getElementById('btn-arena-rematch');
+const btnArenaExit = document.getElementById('btn-arena-exit');
+
+function updateArenaHud() {
+  if (!arenaHudEl || !arena.isActive) return;
+
+  if (arenaTimerStatEl) {
+    const mins = Math.floor(arena.elapsedTime / 60).toString().padStart(2, '0');
+    const secs = Math.floor(arena.elapsedTime % 60).toString().padStart(2, '0');
+    arenaTimerStatEl.textContent = `Storm: ${Math.round(arena.stormRadius)}px | ${mins}:${secs}`;
+  }
+
+  if (arenaLeaderboardEl) {
+    arenaLeaderboardEl.innerHTML = arena.competingClades.map((clade, idx) => {
+      const rankIcon = idx === 0 ? '👑' : `#${idx + 1}`;
+      const opacity = clade.aliveCount > 0 ? '1' : '0.45';
+      return `<div class="arena-clade-row" style="border-left-color: ${clade.color}; opacity: ${opacity};">
+        <span><strong>${rankIcon} ${clade.name}</strong></span>
+        <span>Alive: <strong>${clade.aliveCount}/${clade.initialCount}</strong> | Kills: <strong>${clade.kills}</strong> | NRG: <strong>${Math.round(clade.totalEnergy)}</strong></span>
+      </div>`;
+    }).join('');
+  }
+
+  if (arenaWinnerBannerEl) {
+    if (arena.isComplete && arena.winner) {
+      arenaWinnerBannerEl.textContent = `🏆 CHAMPION CLADE: ${arena.winner.name} (${arena.winner.aliveCount} survivors, ${arena.winner.kills} kills)!`;
+      arenaWinnerBannerEl.classList.add('visible');
+    } else {
+      arenaWinnerBannerEl.classList.remove('visible');
+      arenaWinnerBannerEl.textContent = '';
+    }
+  }
+}
+
+if (btnArenaMode) {
+  btnArenaMode.onclick = () => {
+    if (!arena.isActive) {
+      hideInspector();
+      arena.start();
+      if (arenaHudEl) arenaHudEl.classList.add('open');
+      btnArenaMode.classList.add('active');
+      camera.x = arena.centerX - width / 2;
+      camera.y = arena.centerY - height / 2;
+      camera.zoom = 0.65;
+      updateArenaHud();
+      showToast('⚔️ Species Arena Battle Royale Started! 4 Clades Enter!', 'disaster');
+    } else {
+      arena.stop();
+      if (arenaHudEl) arenaHudEl.classList.remove('open');
+      btnArenaMode.classList.remove('active');
+      showToast('Exited Arena — Sandbox Ecosystem Restored', 'speciation');
+    }
+  };
+}
+
+if (btnArenaRematch) {
+  btnArenaRematch.onclick = () => {
+    hideInspector();
+    arena.start();
+    updateArenaHud();
+    showToast('🔄 Arena Rematch Started!', 'disaster');
+  };
+}
+
+if (btnArenaExit) {
+  btnArenaExit.onclick = () => {
+    hideInspector();
+    arena.stop();
+    if (arenaHudEl) arenaHudEl.classList.remove('open');
+    if (btnArenaMode) btnArenaMode.classList.remove('active');
+    showToast('Exited Arena — Sandbox Ecosystem Restored', 'speciation');
+  };
+}
 
 // Minimap Drawing Helper
 function drawMinimap() {
@@ -886,6 +1001,10 @@ function step() {
 
   if (!isPaused) {
     world.update(dt);
+    if (arena.isActive) {
+      arena.update(dt);
+      updateArenaHud();
+    }
   }
 
   if (cameraFollowSelected && selectedCreature && selectedCreature.isAlive) {
@@ -1047,6 +1166,10 @@ function step() {
   }
 
   world.drawWorldEffects(ctx);
+
+  if (arena.isActive) {
+    arena.draw(ctx);
+  }
 
   // Ambient Day / Night / Sunset atmospheric overlay
   if (world.isNight || world.solarIntensity < 0.85) {

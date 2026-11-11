@@ -328,10 +328,238 @@ async function runFullGameReview() {
   }
   console.log('PASS: Simulation state export and JSON serialization verified!');
 
-  // Check 11: Full Screen Simulation Screenshot
-  console.log('\n12. Capturing Final Gameplay Screenshot...');
+  // Check 12: Live Neural Network Brain & Visualizer in Inspector
+  console.log('\n12. Reviewing Live Neural Network Brain & Visualizer in Inspector...');
+  const neuralCheck = await page.evaluate(() => {
+    const c = window.alsWorld.creatures.find(cr => cr.isAlive);
+    if (!c) throw new Error('No living creature available to select');
+    c.brainType = 'neural';
+    window.alsSelectCreature(c);
+    const canvasEl = document.getElementById('insp-brain-canvas');
+    const badgeEl = document.getElementById('insp-brain-type');
+    return {
+      canvasExists: !!canvasEl,
+      width: canvasEl ? canvasEl.width : 0,
+      height: canvasEl ? canvasEl.height : 0,
+      badgeText: badgeEl ? badgeEl.textContent.trim() : '',
+      weightsLength: c.brain && c.brain.weights ? c.brain.weights.length : 0,
+      outputsLength: c.brain && c.brain.activations && c.brain.activations.output ? c.brain.activations.output.length : 0
+    };
+  });
+  console.log(`  -> Brain Canvas: exists=${neuralCheck.canvasExists}, ${neuralCheck.width}x${neuralCheck.height}`);
+  console.log(`  -> Brain Badge: "${neuralCheck.badgeText}", weights=${neuralCheck.weightsLength}, outputs=${neuralCheck.outputsLength}`);
+  if (!neuralCheck.canvasExists || neuralCheck.width !== 268 || neuralCheck.height !== 165) {
+    throw new Error(`Invalid #insp-brain-canvas dimensions: ${neuralCheck.width}x${neuralCheck.height}`);
+  }
+  if (neuralCheck.badgeText !== 'NEURAL (124 syn)') {
+    throw new Error(`Expected initial badge "NEURAL (124 syn)", got "${neuralCheck.badgeText}"`);
+  }
+  if (neuralCheck.weightsLength !== 124 || neuralCheck.outputsLength !== 4) {
+    throw new Error(`Invalid brain topology: weights=${neuralCheck.weightsLength}, outputs=${neuralCheck.outputsLength}`);
+  }
+
+  // Click #insp-brain-type to toggle to Heuristic
+  await page.click('#insp-brain-type');
+  await page.waitForTimeout(150);
+  const badgeAfterHeuristic = await page.$eval('#insp-brain-type', el => el.textContent.trim());
+  const summaryAfterHeuristic = await page.$eval('#insp-brain-Summary', el => el.textContent.trim());
+  console.log(`  -> Toggled to Heuristic: badge="${badgeAfterHeuristic}", summary="${summaryAfterHeuristic}"`);
+  if (badgeAfterHeuristic !== 'HEURISTIC (Rule)') {
+    throw new Error(`Expected badge "HEURISTIC (Rule)" after click, got "${badgeAfterHeuristic}"`);
+  }
+
+  // Click #insp-brain-type again to restore 'neural'
+  await page.click('#insp-brain-type');
+  await page.waitForTimeout(150);
+  const badgeRestored = await page.$eval('#insp-brain-type', el => el.textContent.trim());
+  const brainModeRestored = await page.evaluate(() => {
+    const c = window.alsWorld.creatures.find(cr => cr.isHighlighted);
+    return c ? c.brainType : null;
+  });
+  console.log(`  -> Restored Neural mode: badge="${badgeRestored}", brainType="${brainModeRestored}"`);
+  if (badgeRestored !== 'NEURAL (124 syn)' || brainModeRestored !== 'neural') {
+    throw new Error(`Failed to restore neural brain mode: badge="${badgeRestored}", brainType="${brainModeRestored}"`);
+  }
+  console.log('PASS: Live Neural Network Brain & Visualizer verified!');
+
+  // Check 13: Dynamic Chromatophores & Aposematic Mimicry
+  console.log('\n13. Reviewing Dynamic Chromatophores & Aposematic Mimicry...');
+  const chromCheck = await page.evaluate(() => {
+    const c = window.alsWorld.creatures.find(cr => cr.isAlive);
+    c.genome.armor = 0.9;
+    c.genome.bravery = 0.9;
+    c.genome.chromatophore = 0.9;
+    c.update(0.1, {
+      worldWidth: window.alsWorld.width,
+      worldHeight: window.alsWorld.height,
+      getBiomeAt: (x, y) => window.alsWorld.getBiomeAt(x, y)
+    });
+    return {
+      hasChromatophoreColor: !!c.chromatophoreColor && typeof c.chromatophoreColor.r === 'number',
+      effectiveColorCss: c.effectiveColorCss,
+      aposematicWarningLevel: c.aposematicWarningLevel
+    };
+  });
+  console.log(`  -> Chromatophore RGB valid: ${chromCheck.hasChromatophoreColor}, CSS: "${chromCheck.effectiveColorCss}", Aposematic Warning: ${chromCheck.aposematicWarningLevel.toFixed(2)}`);
+  if (!chromCheck.hasChromatophoreColor || !chromCheck.effectiveColorCss.startsWith('rgb(') || chromCheck.aposematicWarningLevel <= 0.35) {
+    throw new Error(`Chromatophore / Aposematic check failed: ${JSON.stringify(chromCheck)}`);
+  }
+  console.log('PASS: Dynamic Chromatophores & Aposematic Mimicry verified!');
+
+  // Check 14: Symbiosis Mutualism & Parasitic Leeches
+  console.log('\n14. Reviewing Symbiosis Mutualism & Parasitic Leeches...');
+  const symbiosisCheck = await page.evaluate(() => {
+    const host = new Creature(500, 500, new Genome({ size: 14.0, diet: 0.2, symbiosis: 0.2 }), 180);
+    const parasite = new Creature(505, 500, new Genome({ size: 5.0, diet: 0.75, symbiosis: 0.1 }), 40);
+    const cleaner = new Creature(508, 500, new Genome({ size: 7.5, diet: 0.3, symbiosis: 0.85 }), 60);
+
+    const attached = parasite.attachToHost(host);
+    const hostParasiteCountAfterAttach = host.attachedParasites.length;
+    const cleanerEnergyBefore = cleaner.energy;
+    const gained = cleaner.groomParasite(parasite);
+    const hostParasiteCountAfterGroom = host.attachedParasites.length;
+
+    return {
+      isParasite: parasite.isParasite,
+      isCleaner: cleaner.isCleaner,
+      attached,
+      hostParasiteCountAfterAttach,
+      gained,
+      cleanerEnergyAfter: cleaner.energy,
+      cleanerEnergyBefore,
+      hostParasiteCountAfterGroom,
+      parasiteHostAfterGroom: parasite.hostCreature
+    };
+  });
+  console.log(`  -> Parasite attached: ${symbiosisCheck.attached} (count=${symbiosisCheck.hostParasiteCountAfterAttach}), Cleaner groomed: +${symbiosisCheck.gained.toFixed(1)} NRG (count after=${symbiosisCheck.hostParasiteCountAfterGroom})`);
+  if (!symbiosisCheck.isParasite || !symbiosisCheck.isCleaner || !symbiosisCheck.attached || symbiosisCheck.hostParasiteCountAfterAttach !== 1 || symbiosisCheck.gained <= 0 || symbiosisCheck.hostParasiteCountAfterGroom !== 0 || symbiosisCheck.parasiteHostAfterGroom !== null) {
+    throw new Error(`Symbiosis / Parasite check failed: ${JSON.stringify(symbiosisCheck)}`);
+  }
+  console.log('PASS: Symbiosis Mutualism & Parasitic Leeches verified!');
+
+  // Check 15: Multicellular Colony Coordinator
+  console.log('\n15. Reviewing Multicellular Colony Coordinator...');
+  const colonyCheck = await page.evaluate(() => {
+    const g = new Genome({
+      speciesId: 'sp_colony_e2e',
+      size: 9.0,
+      diet: 0.2,
+      adhesion: 0.92
+    });
+    const c1 = new Creature(800, 800, g.clone(), 120);
+    const c2 = new Creature(805, 800, g.clone(), 120);
+    window.alsWorld.creatures.push(c1, c2);
+    window.alsWorld.creatureGrid.insert(c1);
+    window.alsWorld.creatureGrid.insert(c2);
+    window.alsWorld.registerCreatureSpecies(c1, null);
+    window.alsWorld.registerCreatureSpecies(c2, null);
+
+    window.alsWorld.update(0.05);
+
+    const col = c1.colony;
+    const inWorldColonies = col ? window.alsWorld.colonies.includes(col) : false;
+    const roles = col ? col.cells.map(cell => cell.colonyRole) : [];
+    return {
+      formed: !!col && c1.colony === c2.colony,
+      inWorldColonies,
+      cellCount: col ? col.cells.length : 0,
+      roles
+    };
+  });
+  console.log(`  -> Colony formed: ${colonyCheck.formed}, in world.colonies: ${colonyCheck.inWorldColonies}, cells: ${colonyCheck.cellCount}, roles: [${colonyCheck.roles.join(', ')}]`);
+  if (!colonyCheck.formed || !colonyCheck.inWorldColonies || !colonyCheck.roles.includes('mouth') || !colonyCheck.roles.includes('motor')) {
+    throw new Error(`Multicellular Colony check failed: ${JSON.stringify(colonyCheck)}`);
+  }
+  console.log('PASS: Multicellular Colony Coordinator verified!');
+
+  // Check 16: Species Arena Battle Royale Tournament Mode
+  console.log('\n16. Reviewing Species Arena Battle Royale Tournament Mode...');
+  await page.click('#btn-arena-mode');
+  await page.waitForTimeout(300);
+
+  const arenaStartState = await page.evaluate(() => {
+    const hud = document.getElementById('arena-hud');
+    const rows = document.querySelectorAll('#arena-leaderboard .arena-clade-row');
+    return {
+      hudOpen: hud ? hud.classList.contains('open') : false,
+      isActive: window.alsArena ? window.alsArena.isActive : false,
+      cladeRowCount: rows.length,
+      stormRadius: window.alsArena ? window.alsArena.stormRadius : 0
+    };
+  });
+  console.log(`  -> Arena started: hudOpen=${arenaStartState.hudOpen}, isActive=${arenaStartState.isActive}, clades=${arenaStartState.cladeRowCount}`);
+  if (!arenaStartState.hudOpen || !arenaStartState.isActive || arenaStartState.cladeRowCount !== 4) {
+    throw new Error(`Arena mode failed to start properly: ${JSON.stringify(arenaStartState)}`);
+  }
+
+  // Click #btn-arena-rematch and verify tournament restarts cleanly
+  await page.evaluate(() => {
+    window.alsArena.update(10.0);
+  });
+  await page.click('#btn-arena-rematch');
+  await page.waitForTimeout(200);
+  const arenaRematchState = await page.evaluate(() => {
+    const rows = document.querySelectorAll('#arena-leaderboard .arena-clade-row');
+    return {
+      isActive: window.alsArena.isActive,
+      elapsedTime: window.alsArena.elapsedTime,
+      stormRadius: window.alsArena.stormRadius,
+      initialRadius: window.alsArena.initialRadius,
+      cladeRowCount: rows.length
+    };
+  });
+  console.log(`  -> Arena rematch: isActive=${arenaRematchState.isActive}, elapsedTime=${arenaRematchState.elapsedTime.toFixed(2)}, stormRadius=${arenaRematchState.stormRadius}, clades=${arenaRematchState.cladeRowCount}`);
+  if (!arenaRematchState.isActive || arenaRematchState.cladeRowCount !== 4 || arenaRematchState.stormRadius < arenaRematchState.initialRadius - 50) {
+    throw new Error(`Arena rematch failed: ${JSON.stringify(arenaRematchState)}`);
+  }
+
+  // Click #btn-arena-exit and verify #arena-hud closes and sandbox state is restored
+  await page.click('#btn-arena-exit');
+  await page.waitForTimeout(250);
+  const arenaExitState = await page.evaluate(() => {
+    const hud = document.getElementById('arena-hud');
+    return {
+      hudOpen: hud ? hud.classList.contains('open') : true,
+      isActive: window.alsArena ? window.alsArena.isActive : true,
+      creatureCount: window.alsWorld ? window.alsWorld.creatures.length : 0
+    };
+  });
+  console.log(`  -> Arena exited: hudOpen=${arenaExitState.hudOpen}, isActive=${arenaExitState.isActive}, restored organisms=${arenaExitState.creatureCount}`);
+  if (arenaExitState.hudOpen || arenaExitState.isActive || arenaExitState.creatureCount <= 0) {
+    throw new Error(`Arena exit failed to restore sandbox: ${JSON.stringify(arenaExitState)}`);
+  }
+  console.log('PASS: Species Arena Battle Royale Tournament Mode verified!');
+
+  // Capture Final Gameplay Screenshot before navigating to dist/index.html
+  console.log('\n16.5. Capturing Final Gameplay Screenshot...');
   await page.screenshot({ path: path.join(__dirname, 'gameplay_screen.png') });
   console.log('Saved gameplay screenshot: tests/gameplay_screen.png');
+
+  // Check 17: Cloudflare Pages Production Bundle (dist/index.html)
+  console.log('\n17. Reviewing Cloudflare Pages Production Bundle (dist/index.html)...');
+  const distConsoleErrors = [];
+  const distPageErrors = [];
+  page.on('console', msg => {
+    if (msg.type() === 'error') distConsoleErrors.push(msg.text());
+  });
+  page.on('pageerror', err => {
+    distPageErrors.push(err.toString());
+  });
+
+  const distUrl = 'file:///' + path.resolve(__dirname, '../dist/index.html').replace(/\\/g, '/');
+  console.log('  -> Navigating to:', distUrl);
+  await page.goto(distUrl, { waitUntil: 'load' });
+  await page.waitForTimeout(500);
+
+  const distCreaturesCount = parseInt(await page.$eval('#stat-creatures', el => el.textContent), 10);
+  console.log(`  -> dist/index.html Organism Count: ${distCreaturesCount}, Console Errors: ${distConsoleErrors.length}, Page Errors: ${distPageErrors.length}`);
+  if (distConsoleErrors.length > 0 || distPageErrors.length > 0 || distCreaturesCount <= 0) {
+    throw new Error(`dist/index.html verification failed: creatures=${distCreaturesCount}, consoleErrors=${distConsoleErrors.length}, pageErrors=${distPageErrors.length}`);
+  }
+  if (consoleErrors.length > 0 || pageErrors.length > 0) {
+    throw new Error(`Total console/page errors during review: console=${consoleErrors.length}, page=${pageErrors.length}`);
+  }
+  console.log('PASS: Cloudflare Pages Production Bundle (dist/index.html) verified with 0 errors!');
 
   console.log('\n====================================================');
   console.log('   ALL PLAYWRIGHT TESTS & REVIEWS PASSED (100%)    ');

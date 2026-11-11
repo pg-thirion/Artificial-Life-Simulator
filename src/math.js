@@ -332,6 +332,20 @@ export function mapRange(val, inMin, inMax, outMin, outMax, clampResult = false)
   return clampResult ? clamp(res, Math.min(outMin, outMax), Math.max(outMin, outMax)) : res;
 }
 
+/**
+ * Normalizes an angle in radians to the range [-PI, PI].
+ * Numerically safe and guards non-finite inputs.
+ * @param {number} angle Angle in radians
+ * @returns {number} Normalized angle in [-PI, PI]
+ */
+export function normalizeAngle(angle) {
+  if (!Number.isFinite(angle)) return 0.0;
+  let a = angle % (Math.PI * 2);
+  if (a <= -Math.PI) a += Math.PI * 2;
+  else if (a > Math.PI) a -= Math.PI * 2;
+  return a;
+}
+
 // --- Color Utilities ---
 
 /**

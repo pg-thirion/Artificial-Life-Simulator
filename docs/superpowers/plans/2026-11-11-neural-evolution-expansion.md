@@ -100,12 +100,12 @@ Expected: PASS.
 - Produces:
   - `Creature.prototype.evaluateNeuralBehavior(env: Object): { steerAngleDelta: number, thrustMagnitude: number, courtshipDesire: number, aggressionImpulse: number }`
 
-- [ ] **Step 1: Write failing test for `evaluateNeuralBehavior`**
+- [x] **Step 1: Write failing test for `evaluateNeuralBehavior`**
 Assert that given normalized sensory inputs, neural output controls steering angle, thrust force, courtship trigger, and bite impulse.
-- [ ] **Step 2: Run test to verify failure**
+- [x] **Step 2: Run test to verify failure**
 Run: `npm test`
 Expected: FAIL (`evaluateNeuralBehavior` not a function).
-- [ ] **Step 3: Implement sensory extraction & neural execution in `src/creature.js`**
+- [x] **Step 3: Implement sensory extraction & neural execution in `src/creature.js`**
 Construct 10-element input vector in `evaluateNeuralBehavior`:
 1. `nearestFoodDist`: nearest plant for herbivore, nearest meat/prey for carnivore.
 2. `nearestFoodAngle`: relative heading delta in $[-1, 1]$.
@@ -114,7 +114,7 @@ Construct 10-element input vector in `evaluateNeuralBehavior`:
 6. `nearestMateDist`, 7. `nearestMateAngle`.
 8. `energyRatio`, 9. `biomeDragStress`, 10. `solarIntensity`.
 Apply output steering force: `desiredAngle = this.heading + steerAngleDelta`, `steerForce = Vector2D.fromAngle(desiredAngle, this.genome.speed * thrustMagnitude)`.
-- [ ] **Step 4: Run test to verify passing**
+- [x] **Step 4: Run test to verify passing**
 Run: `npm test`
 Expected: PASS.
 
@@ -132,14 +132,14 @@ Expected: PASS.
   - `Creature.prototype.chromatophoreColor: Object`
   - `Creature.prototype.aposematicWarningLevel: number`
 
-- [ ] **Step 1: Write failing test for chromatophore color shifting and aposematic warning level**
+- [x] **Step 1: Write failing test for chromatophore color shifting and aposematic warning level**
 Assert creature smoothly shifts skin color towards biome color over time, and aposematic warning stripes render when `armor * bravery > 0.35`.
-- [ ] **Step 2: Run test to verify failure**
+- [x] **Step 2: Run test to verify failure**
 Run: `npm test`
 Expected: FAIL.
-- [ ] **Step 3: Implement chromatophore blending and warning ring rendering in `src/creature.js`**
+- [x] **Step 3: Implement chromatophore blending and warning ring rendering in `src/creature.js`**
 In `Creature.update(dt, env)`: lerp `this.chromatophoreColor` towards `env.currentBiome.color` scaled by `this.genome.chromatophore * dt * 2.0`. In `Creature.draw()`, render aposematic yellow/black contrasting bands when toxic/armored. Set `nearestFoodDangerSignal` proportional to target's warning level.
-- [ ] **Step 4: Run test to verify passing**
+- [x] **Step 4: Run test to verify passing**
 Run: `npm test`
 Expected: PASS.
 

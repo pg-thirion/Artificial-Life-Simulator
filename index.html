@@ -578,6 +578,83 @@
       gap: 5px;
       cursor: pointer;
     }
+
+    /* Arena Tournament HUD Overlay */
+    .arena-hud {
+      position: absolute;
+      top: 68px;
+      left: 50%;
+      transform: translateX(-50%) translateY(-10px);
+      background: rgba(15, 23, 42, 0.94);
+      border: 1px solid rgba(244, 63, 94, 0.55);
+      backdrop-filter: blur(12px);
+      border-radius: 12px;
+      padding: 12px 18px;
+      min-width: 390px;
+      max-width: 520px;
+      box-shadow: 0 12px 35px rgba(0, 0, 0, 0.75), 0 0 25px rgba(244, 63, 94, 0.2);
+      z-index: 25;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      opacity: 0;
+      pointer-events: none;
+      transition: all 0.2s ease;
+    }
+    .arena-hud.open {
+      opacity: 1;
+      pointer-events: auto;
+      transform: translateX(-50%) translateY(0);
+    }
+    .arena-hud-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid rgba(244, 63, 94, 0.25);
+      padding-bottom: 6px;
+    }
+    .arena-hud-title {
+      font-size: 13px;
+      font-weight: 700;
+      color: #fda4af;
+      letter-spacing: 0.4px;
+    }
+    .arena-leaderboard {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      font-size: 11px;
+    }
+    .arena-clade-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: rgba(30, 41, 59, 0.65);
+      padding: 4px 8px;
+      border-radius: 5px;
+      border-left: 3px solid #38bdf8;
+    }
+    .arena-winner-banner {
+      display: none;
+      background: linear-gradient(90deg, rgba(245, 158, 11, 0.22), rgba(244, 63, 94, 0.22));
+      border: 1px solid rgba(245, 158, 11, 0.6);
+      color: #fef08a;
+      font-size: 12px;
+      font-weight: 700;
+      text-align: center;
+      padding: 6px 10px;
+      border-radius: 6px;
+    }
+    .arena-winner-banner.visible {
+      display: block;
+    }
+    .arena-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      padding-top: 4px;
+      border-top: 1px solid rgba(255, 255, 255, 0.08);
+    }
   </style>
 </head>
 <body>
@@ -597,6 +674,7 @@
     <div class="audio-bar">
       <button class="audio-btn" id="btn-help-tutorial" title="Open Interactive Tutorial (Hotkey: T or H)">❓ Tutorial</button>
       <button class="audio-btn" id="btn-dna-lab" title="Open DNA Synthesizer Lab">🧬 DNA Lab</button>
+      <button class="audio-btn" id="btn-arena-mode" title="Launch Species Arena Battle Royale" style="border-color: #f43f5e; color: #fda4af;">⚔️ Arena</button>
       <button class="audio-btn" id="btn-save-sim" title="Save World Simulation State">💾 Save</button>
       <button class="audio-btn" id="btn-load-sim" title="Load World Simulation State">📂 Load</button>
       <input type="file" id="file-load-sim" accept=".json" style="display: none;" />
@@ -672,6 +750,20 @@
     </div>
   </div>
 
+  <!-- Arena Battle Royale Tournament HUD -->
+  <div class="arena-hud" id="arena-hud">
+    <div class="arena-hud-header">
+      <span class="arena-hud-title">⚔️ SPECIES ARENA BATTLE ROYALE</span>
+      <span class="badge" id="arena-timer-stat" style="background: rgba(244, 63, 94, 0.2); color: #fda4af;">Storm: 1200px | 00:00</span>
+    </div>
+    <div class="arena-leaderboard" id="arena-leaderboard"></div>
+    <div class="arena-winner-banner" id="arena-winner-banner"></div>
+    <div class="arena-actions">
+      <button id="btn-arena-rematch">🔄 Rematch</button>
+      <button id="btn-arena-exit" class="btn-disaster">🚪 Exit to Sandbox</button>
+    </div>
+  </div>
+
   <!-- Main Controls Bottom Center -->
   <div class="controls">
     <button id="btn-pause">Pause</button>
@@ -701,6 +793,15 @@
     <div class="stats-row"><span>Age / Lifespan:</span><strong id="insp-age">12s / 80s</strong></div>
     <div class="stats-row"><span>Offspring:</span><strong id="insp-offspring">0</strong></div>
     <div class="stats-row"><span>Kills / Plants:</span><strong id="insp-diet-stat">0 / 0</strong></div>
+    <div class="stats-row"><span>Brain:</span><strong id="insp-brain-type" style="color: #c084fc; cursor: pointer;" title="Click to toggle Neural / Heuristic">NEURAL (124 syn)</strong></div>
+
+    <div class="brain-viz-box" style="margin-top: 4px; border: 1px solid rgba(255,255,255,0.1); border-radius: 6px; overflow: hidden; background: rgba(15, 23, 42, 0.7);">
+      <div style="font-size: 9px; color: #94a3b8; padding: 3px 6px; display: flex; justify-content: space-between; border-bottom: 1px solid rgba(255,255,255,0.06);">
+        <span>LIVE NEURAL TOPOLOGY (10→8→4)</span>
+        <span id="insp-brain-Summary">Active</span>
+      </div>
+      <canvas id="insp-brain-canvas" width="268" height="165" style="display: block; width: 100%; height: 165px;"></canvas>
+    </div>
 
     <!-- Inspector Action Buttons -->
     <div class="insp-actions">
@@ -1200,6 +1301,20 @@ function mapRange(val, inMin, inMax, outMin, outMax, clampResult = false) {
   return clampResult ? clamp(res, Math.min(outMin, outMax), Math.max(outMin, outMax)) : res;
 }
 
+/**
+ * Normalizes an angle in radians to the range [-PI, PI].
+ * Numerically safe and guards non-finite inputs.
+ * @param {number} angle Angle in radians
+ * @returns {number} Normalized angle in [-PI, PI]
+ */
+function normalizeAngle(angle) {
+  if (!Number.isFinite(angle)) return 0.0;
+  let a = angle % (Math.PI * 2);
+  if (a <= -Math.PI) a += Math.PI * 2;
+  else if (a > Math.PI) a -= Math.PI * 2;
+  return a;
+}
+
 // --- Color Utilities ---
 
 /**
@@ -1347,6 +1462,232 @@ function geneticColor(genome) {
     eyeWhiteCss,
     diet
   };
+}
+
+
+/* --- src/neuralBrain.js --- */
+/**
+ * Artificial Life Simulator - Neural Brain & Perceptron Engine
+ * Zero-dependency feedforward perceptron: 10 inputs -> 8 hidden (tanh) -> 4 outputs.
+ * Total parameters: exactly 124 weights stored as Float32Array(124).
+ * Caches live activations for visualizer inspection and telemetry.
+ */
+
+
+
+const BRAIN_CONFIG = Object.freeze({
+  INPUT_SIZE: 10,
+  HIDDEN_SIZE: 8,
+  OUTPUT_SIZE: 4,
+  TOTAL_WEIGHTS: 124, // W1 (80) + B1 (8) + W2 (32) + B2 (4)
+  W1_OFFSET: 0,       // 0..79
+  B1_OFFSET: 80,      // 80..87
+  W2_OFFSET: 88,      // 88..119
+  B2_OFFSET: 120,     // 120..123
+  MUTATION_RATE: 0.06,
+  WEIGHT_MIN: -5.0,
+  WEIGHT_MAX: 5.0,
+  INIT_WEIGHT_MIN: -1.0,
+  INIT_WEIGHT_MAX: 1.0,
+  INPUT_LABELS: [
+    'nearestFoodDist',
+    'nearestFoodAngle',
+    'nearestFoodDangerSignal',
+    'nearestThreatDist',
+    'nearestThreatAngle',
+    'nearestMateDist',
+    'nearestMateAngle',
+    'energyRatio',
+    'biomeDragStress',
+    'solarIntensity'
+  ],
+  OUTPUT_LABELS: [
+    'steerAngleDelta',
+    'thrustMagnitude',
+    'courtshipDesire',
+    'aggressionImpulse'
+  ]
+});
+
+/**
+ * Standard numerically stable sigmoid helper clamped to [0, 1].
+ * @param {number} z 
+ * @returns {number}
+ */
+function sigmoid(z) {
+  if (z >= 0) {
+    return clamp(1.0 / (1.0 + Math.exp(-z)), 0.0, 1.0);
+  } else {
+    const ez = Math.exp(z);
+    return clamp(ez / (1.0 + ez), 0.0, 1.0);
+  }
+}
+
+class NeuralBrain {
+  /**
+   * @param {Float32Array|Array<number>|null} [weights=null] 124 parameter weights array or null for random.
+   */
+  constructor(weights = null) {
+    this.weights = new Float32Array(BRAIN_CONFIG.TOTAL_WEIGHTS);
+
+    if (weights && weights.length >= BRAIN_CONFIG.TOTAL_WEIGHTS) {
+      for (let i = 0; i < BRAIN_CONFIG.TOTAL_WEIGHTS; i++) {
+        this.weights[i] = clamp(weights[i], BRAIN_CONFIG.WEIGHT_MIN, BRAIN_CONFIG.WEIGHT_MAX);
+      }
+    } else {
+      const initial = NeuralBrain.randomWeights();
+      this.weights.set(initial);
+    }
+
+    this.activations = {
+      input: new Float32Array(BRAIN_CONFIG.INPUT_SIZE),
+      hidden: new Float32Array(BRAIN_CONFIG.HIDDEN_SIZE),
+      output: new Float32Array(BRAIN_CONFIG.OUTPUT_SIZE)
+    };
+  }
+
+  /**
+   * Evaluates the feedforward network.
+   * Input: 10 sensory features.
+   * Output: 4 motor actions:
+   *  - output[0]: steerAngleDelta in [-PI, PI]
+   *  - output[1]: thrustMagnitude in [0, 1]
+   *  - output[2]: courtshipDesire in [0, 1]
+   *  - output[3]: aggressionImpulse in [0, 1]
+   * Caches activations in this.activations.
+   *
+   * @param {Array<number>|Float32Array} inputs 
+   * @returns {Float32Array} Output activations (length 4)
+   */
+  forward(inputs) {
+    const inAct = this.activations.input;
+    const hidAct = this.activations.hidden;
+    const outAct = this.activations.output;
+    const w = this.weights;
+
+    // Cache sensory inputs
+    const numIn = BRAIN_CONFIG.INPUT_SIZE;
+    for (let i = 0; i < numIn; i++) {
+      inAct[i] = Number.isFinite(inputs[i]) ? inputs[i] : 0.0;
+    }
+
+    // Layer 1: Inputs -> Hidden (tanh)
+    // W1: 8 rows (hidden), 10 cols (inputs). Offset: 0..79
+    // B1: 8 biases. Offset: 80..87
+    const numHid = BRAIN_CONFIG.HIDDEN_SIZE;
+    const b1Offset = BRAIN_CONFIG.B1_OFFSET;
+
+    for (let h = 0; h < numHid; h++) {
+      let sum = w[b1Offset + h];
+      const rowOffset = h * numIn;
+      for (let i = 0; i < numIn; i++) {
+        sum += inAct[i] * w[rowOffset + i];
+      }
+      hidAct[h] = Math.tanh(sum);
+    }
+
+    // Layer 2: Hidden -> Output
+    // W2: 4 rows (outputs), 8 cols (hidden). Offset: 88..119
+    // B2: 4 biases. Offset: 120..123
+    const numOut = BRAIN_CONFIG.OUTPUT_SIZE;
+    const w2Offset = BRAIN_CONFIG.W2_OFFSET;
+    const b2Offset = BRAIN_CONFIG.B2_OFFSET;
+
+    for (let o = 0; o < numOut; o++) {
+      let sum = w[b2Offset + o];
+      const rowOffset = w2Offset + o * numHid;
+      for (let h = 0; h < numHid; h++) {
+        sum += hidAct[h] * w[rowOffset + h];
+      }
+
+      if (o === 0) {
+        // Output 0: Turning impulse in [-PI, PI]
+        outAct[0] = clamp(Math.tanh(sum) * Math.PI, -Math.PI, Math.PI);
+      } else {
+        // Output 1..3: Action drives in [0, 1]
+        outAct[o] = sigmoid(sum);
+      }
+    }
+
+    return outAct;
+  }
+
+  /**
+   * Generates a new Float32Array(124) with uniform random weights in [-1.0, 1.0].
+   * @returns {Float32Array}
+   */
+  static randomWeights() {
+    const weights = new Float32Array(BRAIN_CONFIG.TOTAL_WEIGHTS);
+    for (let i = 0; i < BRAIN_CONFIG.TOTAL_WEIGHTS; i++) {
+      weights[i] = randomFloat(BRAIN_CONFIG.INIT_WEIGHT_MIN, BRAIN_CONFIG.INIT_WEIGHT_MAX);
+    }
+    return weights;
+  }
+
+  /**
+   * Mutates synaptic weights using Gaussian noise with 5% chance of sign flip.
+   * Clamps all weights to [-5.0, 5.0].
+   * Does not mutate original weights array.
+   *
+   * @param {Float32Array|Array<number>} weights 
+   * @param {number} [mutationRate=0.06] Probability of mutation per synapse
+   * @param {number} [stdDev=0.2] Gaussian noise standard deviation
+   * @returns {Float32Array} New mutated weights array
+   */
+  static mutateWeights(weights, mutationRate = BRAIN_CONFIG.MUTATION_RATE, stdDev = 0.2) {
+    const total = BRAIN_CONFIG.TOTAL_WEIGHTS;
+    const child = new Float32Array(total);
+
+    for (let i = 0; i < total; i++) {
+      let val = weights[i];
+
+      if (Math.random() < mutationRate) {
+        // Perturb with Gaussian noise
+        val += randomGaussian(0, stdDev);
+
+        // 5% chance of structural macro-mutation (sign flip)
+        if (Math.random() < 0.05) {
+          val = -val;
+        }
+      }
+
+      child[i] = clamp(val, BRAIN_CONFIG.WEIGHT_MIN, BRAIN_CONFIG.WEIGHT_MAX);
+    }
+
+    return child;
+  }
+
+  /**
+   * Sexual crossover recombines two parent weight genomes 50/50 with occasional arithmetic blending.
+   * Clamps all weights to [-5.0, 5.0].
+   *
+   * @param {Float32Array|Array<number>} wA Parent A weights
+   * @param {Float32Array|Array<number>} wB Parent B weights
+   * @returns {Float32Array} New recombinant child weights
+   */
+  static crossoverWeights(wA, wB) {
+    const total = BRAIN_CONFIG.TOTAL_WEIGHTS;
+    const child = new Float32Array(total);
+
+    for (let i = 0; i < total; i++) {
+      const r = Math.random();
+      let val;
+
+      if (r < 0.45) {
+        val = wA[i];
+      } else if (r < 0.90) {
+        val = wB[i];
+      } else {
+        // 10% chance of arithmetic blend
+        const blend = Math.random();
+        val = wA[i] * blend + wB[i] * (1.0 - blend);
+      }
+
+      child[i] = clamp(val, BRAIN_CONFIG.WEIGHT_MIN, BRAIN_CONFIG.WEIGHT_MAX);
+    }
+
+    return child;
+  }
 }
 
 
@@ -2139,6 +2480,7 @@ class FoodManager {
 
 
 
+
 let NEXT_SPECIES_COUNTER = 1;
 
 const GENE_BOUNDS = {
@@ -2153,7 +2495,10 @@ const GENE_BOUNDS = {
   efficiency: { min: 0.6, max: 1.4, default: 1.0 },
   flocking: { min: 0.0, max: 1.0, default: 0.5 },
   armor: { min: 0.0, max: 1.0, default: 0.2 },
-  nocturnal: { min: 0.0, max: 1.0, default: 0.2 }
+  nocturnal: { min: 0.0, max: 1.0, default: 0.2 },
+  chromatophore: { min: 0.0, max: 1.0, default: 0.3 },
+  adhesion: { min: 0.0, max: 1.0, default: 0.1 },
+  symbiosis: { min: 0.0, max: 1.0, default: 0.2 }
 };
 
 class Genome {
@@ -2173,6 +2518,16 @@ class Genome {
     this.flocking = clamp(traits.flocking ?? GENE_BOUNDS.flocking.default, GENE_BOUNDS.flocking.min, GENE_BOUNDS.flocking.max);
     this.armor = clamp(traits.armor ?? GENE_BOUNDS.armor.default, GENE_BOUNDS.armor.min, GENE_BOUNDS.armor.max);
     this.nocturnal = clamp(traits.nocturnal ?? GENE_BOUNDS.nocturnal.default, GENE_BOUNDS.nocturnal.min, GENE_BOUNDS.nocturnal.max);
+    this.chromatophore = clamp(traits.chromatophore ?? GENE_BOUNDS.chromatophore.default, GENE_BOUNDS.chromatophore.min, GENE_BOUNDS.chromatophore.max);
+    this.adhesion = clamp(traits.adhesion ?? GENE_BOUNDS.adhesion.default, GENE_BOUNDS.adhesion.min, GENE_BOUNDS.adhesion.max);
+    this.symbiosis = clamp(traits.symbiosis ?? GENE_BOUNDS.symbiosis.default, GENE_BOUNDS.symbiosis.min, GENE_BOUNDS.symbiosis.max);
+
+    this.brainType = traits.brainType === 'heuristic' ? 'heuristic' : 'neural';
+    if (traits.brainWeights && traits.brainWeights.length >= 124) {
+      this.brainWeights = new Float32Array(traits.brainWeights);
+    } else {
+      this.brainWeights = NeuralBrain.randomWeights();
+    }
 
     this.generation = traits.generation ?? 1;
     this.speciesId = traits.speciesId ?? `sp_${NEXT_SPECIES_COUNTER++}`;
@@ -2332,6 +2687,31 @@ class Genome {
       GENE_BOUNDS.nocturnal.max
     );
 
+    const newChromatophore = clamp(
+      randomGaussian(this.chromatophore, rate * 0.5),
+      GENE_BOUNDS.chromatophore.min,
+      GENE_BOUNDS.chromatophore.max
+    );
+
+    const newAdhesion = clamp(
+      randomGaussian(this.adhesion, rate * 0.5),
+      GENE_BOUNDS.adhesion.min,
+      GENE_BOUNDS.adhesion.max
+    );
+
+    const newSymbiosis = clamp(
+      randomGaussian(this.symbiosis, rate * 0.5),
+      GENE_BOUNDS.symbiosis.min,
+      GENE_BOUNDS.symbiosis.max
+    );
+
+    const newBrainWeights = NeuralBrain.mutateWeights(this.brainWeights, rate);
+
+    let newBrainType = this.brainType;
+    if (Math.random() < 0.02) {
+      newBrainType = newBrainType === 'neural' ? 'heuristic' : 'neural';
+    }
+
     const child = new Genome({
       speed: newSpeed,
       sense: newSense,
@@ -2345,6 +2725,11 @@ class Genome {
       flocking: newFlocking,
       armor: newArmor,
       nocturnal: newNocturnal,
+      chromatophore: newChromatophore,
+      adhesion: newAdhesion,
+      symbiosis: newSymbiosis,
+      brainType: newBrainType,
+      brainWeights: newBrainWeights,
       generation: this.generation + 1,
       speciesId: this.speciesId
     });
@@ -2371,6 +2756,9 @@ class Genome {
       return lerp(this[gene], partner[gene], randomFloat(0.2, 0.8));
     };
 
+    const childWeights = NeuralBrain.crossoverWeights(this.brainWeights, partner.brainWeights);
+    const childBrainType = Math.random() < 0.5 ? this.brainType : partner.brainType;
+
     const offspring = new Genome({
       speed: pick('speed'),
       sense: pick('sense'),
@@ -2384,6 +2772,11 @@ class Genome {
       flocking: pick('flocking'),
       armor: pick('armor'),
       nocturnal: pick('nocturnal'),
+      chromatophore: pick('chromatophore'),
+      adhesion: pick('adhesion'),
+      symbiosis: pick('symbiosis'),
+      brainType: childBrainType,
+      brainWeights: childWeights,
       generation: Math.max(this.generation, partner.generation) + 1,
       speciesId: this.speciesId
     });
@@ -2414,17 +2807,34 @@ class Genome {
     const dArmor = (this.armor ?? 0.2) - (other.armor ?? 0.2);
     const dNocturnal = (this.nocturnal ?? 0.2) - (other.nocturnal ?? 0.2);
     const dMeta = (this.metabolismRate - other.metabolismRate) / (GENE_BOUNDS.metabolismRate.max - GENE_BOUNDS.metabolismRate.min);
+    const dChromatophore = (this.chromatophore ?? GENE_BOUNDS.chromatophore.default) - (other.chromatophore ?? GENE_BOUNDS.chromatophore.default);
+    const dAdhesion = (this.adhesion ?? GENE_BOUNDS.adhesion.default) - (other.adhesion ?? GENE_BOUNDS.adhesion.default);
+    const dSymbiosis = (this.symbiosis ?? GENE_BOUNDS.symbiosis.default) - (other.symbiosis ?? GENE_BOUNDS.symbiosis.default);
+
+    let dSynaptic = 0;
+    if (this.brainWeights && other.brainWeights) {
+      let sumDiff = 0;
+      const len = Math.min(this.brainWeights.length, other.brainWeights.length);
+      for (let i = 0; i < len; i++) {
+        sumDiff += Math.abs(this.brainWeights[i] - other.brainWeights[i]);
+      }
+      dSynaptic = len > 0 ? (sumDiff / (len * 10.0)) : 0;
+    }
 
     // Weights: Diet and Size have highest evolutionary weight in morphological divergence
-    const wDiet = 0.30;
-    const wSize = 0.19;
-    const wSpeed = 0.15;
-    const wSense = 0.11;
-    const wCamouflage = 0.07;
-    const wArmor = 0.07;
-    const wNocturnal = 0.05;
+    const wDiet = 0.26;
+    const wSize = 0.16;
+    const wSpeed = 0.13;
+    const wSense = 0.09;
+    const wCamouflage = 0.05;
+    const wArmor = 0.05;
+    const wNocturnal = 0.04;
     const wBravery = 0.04;
     const wMeta = 0.02;
+    const wChromatophore = 0.04;
+    const wAdhesion = 0.04;
+    const wSymbiosis = 0.04;
+    const wSynaptic = 0.04;
 
     const distSq = 
       wDiet * (dDiet * dDiet) +
@@ -2435,9 +2845,22 @@ class Genome {
       wArmor * (dArmor * dArmor) +
       wNocturnal * (dNocturnal * dNocturnal) +
       wBravery * (dBravery * dBravery) +
-      wMeta * (dMeta * dMeta);
+      wMeta * (dMeta * dMeta) +
+      wChromatophore * (dChromatophore * dChromatophore) +
+      wAdhesion * (dAdhesion * dAdhesion) +
+      wSymbiosis * (dSymbiosis * dSymbiosis) +
+      wSynaptic * (dSynaptic * dSynaptic);
 
     return Math.sqrt(distSq);
+  }
+
+  /**
+   * Alias for geneticDistance.
+   * @param {Genome} other 
+   * @returns {number}
+   */
+  distance(other) {
+    return this.geneticDistance(other);
   }
 
   /**
@@ -2458,6 +2881,11 @@ class Genome {
       flocking: this.flocking,
       armor: this.armor,
       nocturnal: this.nocturnal,
+      chromatophore: this.chromatophore,
+      adhesion: this.adhesion,
+      symbiosis: this.symbiosis,
+      brainType: this.brainType,
+      brainWeights: new Float32Array(this.brainWeights),
       generation: this.generation,
       speciesId: this.speciesId
     });
@@ -2481,6 +2909,11 @@ class Genome {
       flocking: this.flocking,
       armor: this.armor,
       nocturnal: this.nocturnal,
+      chromatophore: this.chromatophore,
+      adhesion: this.adhesion,
+      symbiosis: this.symbiosis,
+      brainType: this.brainType,
+      brainWeights: Array.from(this.brainWeights),
       generation: this.generation,
       speciesId: this.speciesId
     };
@@ -2507,7 +2940,38 @@ class Genome {
 
 
 
+
 let NEXT_CREATURE_ID = 1;
+
+/**
+ * Extracts or parses base RGB triplet from a creature genome or color representation.
+ * @param {Genome|Object} genome
+ * @returns {{r: number, g: number, b: number}}
+ */
+function getInitialGenomeRgb(genome) {
+  if (!genome) return { r: 120, g: 140, b: 200 };
+  const c = genome.color;
+  if (!c) return { r: 120, g: 140, b: 200 };
+  if (typeof c.r === 'number' && typeof c.g === 'number' && typeof c.b === 'number') {
+    return { r: c.r, g: c.g, b: c.b };
+  }
+  if (typeof c.hue === 'number' && typeof c.saturation === 'number' && typeof c.lightness === 'number') {
+    const rgb = hslToRgb(c.hue, c.saturation, c.lightness);
+    return { r: rgb.r, g: rgb.g, b: rgb.b };
+  }
+  if (typeof c.bodyCss === 'string') {
+    const hslMatch = c.bodyCss.match(/hsl\(\s*([\d.]+)\s*,\s*([\d.]+)%\s*,\s*([\d.]+)%\s*\)/);
+    if (hslMatch) {
+      const rgb = hslToRgb(parseFloat(hslMatch[1]), parseFloat(hslMatch[2]), parseFloat(hslMatch[3]));
+      return { r: rgb.r, g: rgb.g, b: rgb.b };
+    }
+    const rgbMatch = c.bodyCss.match(/rgb\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*\)/);
+    if (rgbMatch) {
+      return { r: parseFloat(rgbMatch[1]), g: parseFloat(rgbMatch[2]), b: parseFloat(rgbMatch[3]) };
+    }
+  }
+  return { r: 120, g: 140, b: 200 };
+}
 
 class Creature {
   /**
@@ -2521,6 +2985,9 @@ class Creature {
 
     // Genetics
     this.genome = genome ? genome.clone() : Genome.random('herbivore');
+
+    // Neural Perceptron Brain
+    this.brain = new NeuralBrain(this.genome.brainWeights);
 
     // Organism Physics
     this.position = new Vector2D(x, y);
@@ -2578,6 +3045,97 @@ class Creature {
     this.isHighlighted = false;
     this.isPossessed = false;
     this.playerInputVector = new Vector2D(0, 0);
+
+    // Neural sensory and motor telemetry
+    this.lastNeuralInputs = null;
+    this.lastNeuralOutputs = null;
+
+    // Parasite and Symbiosis Dynamics
+    this.attachedParasites = [];
+    this.hostCreature = null;
+    this.parasiteOffsetAngle = 0;
+
+    // Multicellular Colony Dynamics
+    this.colony = null;
+    this.colonyRole = null;
+    this.colonyAngleOffset = 0;
+    this.colonyDistOffset = 0;
+    this.colonySpeedMultiplier = 1.0;
+    this.speedMultiplier = 1.0;
+
+    // Dynamic chromatophore phenotypic coloration
+    const initialRgb = getInitialGenomeRgb(this.genome);
+    this._baseGenomeRgb = { r: initialRgb.r, g: initialRgb.g, b: initialRgb.b };
+    this.chromatophoreColor = { r: initialRgb.r, g: initialRgb.g, b: initialRgb.b };
+  }
+
+  /**
+   * Brain architecture type ('neural' | 'heuristic').
+   * @returns {'neural'|'heuristic'}
+   */
+  get brainType() {
+    return this.genome.brainType;
+  }
+
+  set brainType(val) {
+    this.genome.brainType = val;
+  }
+
+  /**
+   * Current dynamic skin color in CSS rgb format.
+   * Modulated by chromatophore camouflage blending.
+   * @returns {string} CSS rgb color string
+   */
+  get effectiveColorCss() {
+    const c = this.chromatophoreColor;
+    if (!c) {
+      return this.genome?.color?.bodyCss ?? 'rgb(120, 140, 200)';
+    }
+    const r = clamp(Math.round(c.r), 0, 255);
+    const g = clamp(Math.round(c.g), 0, 255);
+    const b = clamp(Math.round(c.b), 0, 255);
+    return `rgb(${r}, ${g}, ${b})`;
+  }
+
+  /**
+   * Genuine warning coloration or deceptive Batesian mimicry level [0, 1].
+   * - Genuine aposematism: toxic/armored and bold creatures signal danger.
+   * - Batesian mimicry: defenceless creatures with high camouflage mimic the warning.
+   * @returns {number} Normalized danger warning level [0, 1]
+   */
+  get aposematicWarningLevel() {
+    const armor = this.genome?.armor ?? 0.2;
+    const bravery = this.genome?.bravery ?? 0.5;
+    const camouflage = this.genome?.camouflage ?? 0.25;
+
+    // Base toxicity/armor signal: genuine = clamp((armor * bravery - 0.20) / 0.45, 0, 1)
+    const genuine = clamp((armor * bravery - 0.20) / 0.45, 0, 1);
+
+    // Batesian mimicry: defenceless creatures with high camouflage mimic toxic warning:
+    // (camouflage - 0.65) / 0.35 when camouflage > 0.65
+    const mimic = (camouflage > 0.65) ? clamp((camouflage - 0.65) / 0.35, 0, 1) : 0;
+
+    return clamp(Math.max(genuine, mimic), 0, 1);
+  }
+
+  /**
+   * Whether this organism exhibits parasitic morphology and behavioral phenotype.
+   * symbiosis < 0.25, diet > 0.45, size < 7.0
+   * @returns {boolean}
+   */
+  get isParasite() {
+    return (this.genome?.symbiosis ?? 0.2) < 0.25 &&
+      (this.genome?.diet ?? 0) > 0.45 &&
+      (this.genome?.size ?? 8) < 7.0;
+  }
+
+  /**
+   * Whether this organism is a mutualist cleaner fish.
+   * symbiosis >= 0.6
+   * @returns {boolean}
+   */
+  get isCleaner() {
+    return (this.genome?.symbiosis ?? 0.2) >= 0.6;
   }
 
   /**
@@ -2729,6 +3287,235 @@ class Creature {
   }
 
   /**
+   * Evaluates the 10-input normalized sensory pipeline and actuates neural motor impulses.
+   * Inputs (all finite, normalized):
+   *  0: nearestFoodDistNorm [0, 1]
+   *  1: nearestFoodAngleNorm [-1, 1]
+   *  2: nearestFoodDangerSignal [0, 1]
+   *  3: nearestThreatDistNorm [0, 1]
+   *  4: nearestThreatAngleNorm [-1, 1]
+   *  5: nearestMateDistNorm [0, 1]
+   *  6: nearestMateAngleNorm [-1, 1]
+   *  7: energyRatio [0, 1]
+   *  8: biomeDragStress [0, 1]
+   *  9: solarIntensity [0, 1]
+   *
+   * @param {Object} [env={}] Environmental perception context
+   * @returns {{steerAngleDelta: number, thrustMagnitude: number, courtshipDesire: number, aggressionImpulse: number, inputs: Float32Array, outputs: Float32Array}}
+   */
+  evaluateNeuralBehavior(env = {}) {
+    const safeEnv = env || {};
+
+    // Circadian nocturnal perception scaling
+    let effectiveSense = this.genome.sense;
+    if (safeEnv.isNight) {
+      if ((this.genome.nocturnal ?? 0.2) >= 0.5) {
+        effectiveSense *= 1.25;
+      } else {
+        effectiveSense *= 0.82;
+      }
+    }
+    const sense = Math.max(1.0, effectiveSense);
+
+    // 1. Scan for Food Pellets & Living Prey
+    let closestFoodEntity = null;
+    let closestFoodDist = Infinity;
+    let closestFoodIsPrey = false;
+
+    if (safeEnv.foodGrid) {
+      const prefersMeat = this.genome.diet > 0.55;
+      const prefersPlants = this.genome.diet < 0.45;
+      const nearestPellet = safeEnv.foodGrid.queryNearest(this.position.x, this.position.y, sense, (food) => {
+        if (food.isRotten) return false;
+        if (prefersMeat) return food.type === 'meat';
+        if (prefersPlants) return food.type === 'plant';
+        return true;
+      });
+      if (nearestPellet) {
+        closestFoodEntity = nearestPellet.entity;
+        closestFoodDist = nearestPellet.distance;
+        closestFoodIsPrey = false;
+      }
+    }
+
+    if (this.genome.diet >= 0.42 && safeEnv.creatureGrid) {
+      const isStarving = this.energy < this.maxEnergy * 0.25;
+      const preyCandidates = safeEnv.creatureGrid.queryRadius(this.position.x, this.position.y, sense, (c) => {
+        if (c === this || !c.isAlive) return false;
+        // Cleaners (symbiosis >= 0.6) are immune to predators unless predator is starving
+        if ((c.genome?.symbiosis ?? 0) >= 0.6 && !isStarving) return false;
+        const camo = c.genome?.camouflage ?? 0.25;
+        const d = this.position.dist(c.position);
+        const maxDetectDist = sense * (1.0 - camo * 0.60);
+        return d <= maxDetectDist &&
+          (this.genome.size > c.genome.size * 1.08) &&
+          (c.genome.diet < this.genome.diet) &&
+          (this.genome.geneticDistance(c.genome) > 0.16);
+      });
+      for (let i = 0; i < preyCandidates.length; i++) {
+        const p = preyCandidates[i];
+        const d = this.position.dist(p.position);
+        if (d < closestFoodDist) {
+          closestFoodDist = d;
+          closestFoodEntity = p;
+          closestFoodIsPrey = true;
+        }
+      }
+    }
+
+    let nearestFoodDistNorm = 0.0;
+    let nearestFoodAngleNorm = 0.0;
+    let nearestFoodDangerSignal = 0.0;
+
+    if (closestFoodEntity && Number.isFinite(closestFoodDist)) {
+      nearestFoodDistNorm = 1.0 - clamp(closestFoodDist / sense, 0.0, 1.0);
+      const targetPos = closestFoodEntity.position;
+      const angleToTarget = Math.atan2(targetPos.y - this.position.y, targetPos.x - this.position.x);
+      const angleDelta = normalizeAngle(angleToTarget - this.heading);
+      nearestFoodAngleNorm = clamp(angleDelta / Math.PI, -1.0, 1.0);
+      if (closestFoodIsPrey) {
+        nearestFoodDangerSignal = clamp(closestFoodEntity.aposematicWarningLevel ?? closestFoodEntity.genome?.armor ?? 0.0, 0.0, 1.0);
+      } else {
+        nearestFoodDangerSignal = 0.0;
+      }
+    }
+
+    // 2. Scan for Predatory Threats
+    let closestThreat = null;
+    let closestThreatDist = Infinity;
+
+    if (safeEnv.creatureGrid) {
+      const threatCandidates = safeEnv.creatureGrid.queryRadius(this.position.x, this.position.y, sense, (c) => {
+        if (this.isParasite && (c.genome?.size ?? 0) > this.genome.size * 1.35) return false;
+        return c !== this && c.isAlive && c.genome?.diet > 0.45 && c.genome?.size > this.genome.size * 1.12;
+      });
+      for (let i = 0; i < threatCandidates.length; i++) {
+        const t = threatCandidates[i];
+        const d = this.position.dist(t.position);
+        if (d <= sense && (d < closestThreatDist || (Math.abs(d - closestThreatDist) < 1e-4 && t.genome.size > closestThreat.genome.size))) {
+          closestThreatDist = d;
+          closestThreat = t;
+        }
+      }
+    }
+
+    let nearestThreatDistNorm = 0.0;
+    let nearestThreatAngleNorm = 0.0;
+
+    if (closestThreat && Number.isFinite(closestThreatDist)) {
+      nearestThreatDistNorm = 1.0 - clamp(closestThreatDist / sense, 0.0, 1.0);
+      const angleToThreat = Math.atan2(closestThreat.position.y - this.position.y, closestThreat.position.x - this.position.x);
+      const angleDelta = normalizeAngle(angleToThreat - this.heading);
+      nearestThreatAngleNorm = clamp(angleDelta / Math.PI, -1.0, 1.0);
+    }
+
+    // 3. Scan for Potential Mates (compatible species)
+    let closestMate = null;
+    let closestMateDist = Infinity;
+
+    if (safeEnv.creatureGrid) {
+      const mateCandidates = safeEnv.creatureGrid.queryRadius(this.position.x, this.position.y, sense, (c) => {
+        return c !== this && c.isAlive && this.genome.geneticDistance(c.genome) <= 0.40;
+      });
+      for (let i = 0; i < mateCandidates.length; i++) {
+        const m = mateCandidates[i];
+        const d = this.position.dist(m.position);
+        if (d <= sense && d < closestMateDist) {
+          closestMateDist = d;
+          closestMate = m;
+        }
+      }
+    }
+
+    let nearestMateDistNorm = 0.0;
+    let nearestMateAngleNorm = 0.0;
+
+    if (closestMate && Number.isFinite(closestMateDist)) {
+      nearestMateDistNorm = 1.0 - clamp(closestMateDist / sense, 0.0, 1.0);
+      const angleToMate = Math.atan2(closestMate.position.y - this.position.y, closestMate.position.x - this.position.x);
+      const angleDelta = normalizeAngle(angleToMate - this.heading);
+      nearestMateAngleNorm = clamp(angleDelta / Math.PI, -1.0, 1.0);
+    }
+
+    // 4. Internal Metabolic State
+    const energyRatio = (this.maxEnergy > 0 && Number.isFinite(this.energy))
+      ? clamp(this.energy / this.maxEnergy, 0.0, 1.0)
+      : 0.0;
+
+    // 5. Environmental Factors: Drag & Solar Intensity
+    let biomeDragStress = 0.0;
+    if (typeof safeEnv.drag === 'number') {
+      biomeDragStress = safeEnv.drag;
+    } else if (typeof safeEnv.biomeDrag === 'number') {
+      biomeDragStress = safeEnv.biomeDrag;
+    } else if (typeof safeEnv.getBiomeAt === 'function') {
+      const biome = safeEnv.getBiomeAt(this.position.x, this.position.y);
+      if (biome && typeof biome.drag === 'number') {
+        biomeDragStress = biome.drag;
+      }
+    }
+    biomeDragStress = clamp(Number.isFinite(biomeDragStress) ? biomeDragStress : 0.0, 0.0, 1.0);
+
+    let solarIntensity = 0.9;
+    if (typeof safeEnv.solarIntensity === 'number') {
+      solarIntensity = safeEnv.solarIntensity;
+    } else if (safeEnv.isNight !== undefined) {
+      solarIntensity = safeEnv.isNight ? 0.15 : 0.9;
+    }
+    solarIntensity = clamp(Number.isFinite(solarIntensity) ? solarIntensity : 0.9, 0.0, 1.0);
+
+    // Guard all 10 features into Float32Array(10)
+    const inputs = new Float32Array(10);
+    inputs[0] = clamp(Number.isFinite(nearestFoodDistNorm) ? nearestFoodDistNorm : 0, 0, 1);
+    inputs[1] = clamp(Number.isFinite(nearestFoodAngleNorm) ? nearestFoodAngleNorm : 0, -1, 1);
+    inputs[2] = clamp(Number.isFinite(nearestFoodDangerSignal) ? nearestFoodDangerSignal : 0, 0, 1);
+    inputs[3] = clamp(Number.isFinite(nearestThreatDistNorm) ? nearestThreatDistNorm : 0, 0, 1);
+    inputs[4] = clamp(Number.isFinite(nearestThreatAngleNorm) ? nearestThreatAngleNorm : 0, -1, 1);
+    inputs[5] = clamp(Number.isFinite(nearestMateDistNorm) ? nearestMateDistNorm : 0, 0, 1);
+    inputs[6] = clamp(Number.isFinite(nearestMateAngleNorm) ? nearestMateAngleNorm : 0, -1, 1);
+    inputs[7] = clamp(Number.isFinite(energyRatio) ? energyRatio : 0, 0, 1);
+    inputs[8] = clamp(Number.isFinite(biomeDragStress) ? biomeDragStress : 0, 0, 1);
+    inputs[9] = clamp(Number.isFinite(solarIntensity) ? solarIntensity : 0, 0, 1);
+
+    // Forward pass
+    if (!this.brain) {
+      this.brain = new NeuralBrain(this.genome.brainWeights);
+    }
+    const outputs = this.brain.forward(inputs);
+    const steerAngleDelta = Number.isFinite(outputs[0]) ? outputs[0] : 0.0;
+    const thrustMagnitude = Number.isFinite(outputs[1]) ? outputs[1] : 0.0;
+    const courtshipDesire = Number.isFinite(outputs[2]) ? outputs[2] : 0.0;
+    const aggressionImpulse = Number.isFinite(outputs[3]) ? outputs[3] : 0.0;
+
+    // Motor Actuation
+    const desiredHeading = this.heading + steerAngleDelta;
+    const desiredVel = Vector2D.fromAngle(desiredHeading, this.genome.speed * thrustMagnitude);
+    const steerForce = Vector2D.sub(desiredVel, this.velocity);
+    steerForce.limit(0.55);
+    this.applyForce(steerForce);
+
+    // Cache telemetry and targets
+    this.lastNeuralInputs = inputs;
+    this.lastNeuralOutputs = outputs;
+    this.currentTarget = closestFoodEntity;
+    this.threatTarget = closestThreat;
+    this.courtshipTarget = closestMate;
+    this.state = 'neural';
+    const thrustPct = (thrustMagnitude * 100).toFixed(0);
+    const turnDeg = (steerAngleDelta * 180 / Math.PI).toFixed(0);
+    this.currentIntention = `Neural: Thrust ${thrustPct}%, Turn ${turnDeg}°`;
+
+    return {
+      steerAngleDelta,
+      thrustMagnitude,
+      courtshipDesire,
+      aggressionImpulse,
+      inputs,
+      outputs
+    };
+  }
+
+  /**
    * Evaluates sensory perception and steers towards targets or away from predators.
    * @param {Object} env Environment context
    * @param {SpatialGrid} env.foodGrid
@@ -2753,6 +3540,73 @@ class Creature {
       return { action: 'possessed', target: null };
     }
 
+    // Attached parasites do not steer autonomously
+    if (this.hostCreature) {
+      this.state = 'latched';
+      this.currentIntention = `Siphoning host [${this.hostCreature.genome?.speciesId ?? ''}]`;
+      return { action: 'latched', target: this.hostCreature };
+    }
+
+    // Member cells of a colony delegate steering to the colony core cell
+    if (this.colony && this.colony.coreCell !== this) {
+      this.state = 'colony_member';
+      this.currentIntention = `Colony Member (${this.colonyRole || 'cell'})`;
+      return { action: 'colony_member', target: this.colony.coreCell };
+    }
+
+    // Cleaner mutualist: seek host with attached parasites
+    if (this.isCleaner && env && env.creatureGrid) {
+      const infestedCandidates = env.creatureGrid.queryRadius(this.position.x, this.position.y, this.genome.sense, (c) => {
+        return c !== this && c.isAlive && c.attachedParasites && c.attachedParasites.length > 0;
+      });
+      if (infestedCandidates.length > 0) {
+        let bestHost = infestedCandidates[0];
+        let bestDistSq = this.position.distSq(bestHost.position);
+        for (let i = 1; i < infestedCandidates.length; i++) {
+          const dSq = this.position.distSq(infestedCandidates[i].position);
+          if (dSq < bestDistSq) {
+            bestDistSq = dSq;
+            bestHost = infestedCandidates[i];
+          }
+        }
+        this.currentTarget = bestHost;
+        this.state = 'foraging';
+        this.currentIntention = `Grooming host [${bestHost.genome.speciesId}]`;
+        const seekForce = this.seek(bestHost.position, 16);
+        this.applyForce(seekForce.mult(1.2));
+        return { action: 'seek_grooming', target: bestHost };
+      }
+    }
+
+    // Parasite: seek large host
+    if (this.isParasite && !this.hostCreature && env && env.creatureGrid) {
+      const hostCandidates = env.creatureGrid.queryRadius(this.position.x, this.position.y, this.genome.sense, (c) => {
+        return c !== this && c.isAlive && (c.genome?.size ?? 0) > this.genome.size * 1.35;
+      });
+      if (hostCandidates.length > 0) {
+        let bestHost = hostCandidates[0];
+        let bestDistSq = this.position.distSq(bestHost.position);
+        for (let i = 1; i < hostCandidates.length; i++) {
+          const dSq = this.position.distSq(hostCandidates[i].position);
+          if (dSq < bestDistSq) {
+            bestDistSq = dSq;
+            bestHost = hostCandidates[i];
+          }
+        }
+        this.currentTarget = bestHost;
+        this.state = 'hunting';
+        this.currentIntention = `Stalking host [${bestHost.genome.speciesId}]`;
+        const seekForce = this.seek(bestHost.position, 16);
+        this.applyForce(seekForce.mult(1.2));
+        return { action: 'seek_host', target: bestHost };
+      }
+    }
+
+    // Neural Brain Autonomous Steering
+    if (this.brainType === 'neural') {
+      return this.evaluateNeuralBehavior(env);
+    }
+
     // Circadian nocturnal perception scaling
     let effectiveSense = this.genome.sense;
     if (env && env.isNight) {
@@ -2775,6 +3629,7 @@ class Creature {
     // Other creatures with carnivore/omnivore diet that are larger and genetically different
     if (env.creatureGrid) {
       const candidates = env.creatureGrid.queryRadius(this.position.x, this.position.y, sense, (c) => {
+        if (this.isParasite && (c.genome?.size ?? 0) > this.genome.size * 1.35) return false;
         return c !== this && c.isAlive && c.genome.diet > 0.45 && c.genome.size > this.genome.size * 1.12;
       });
 
@@ -2805,8 +3660,11 @@ class Creature {
 
     // 2. Scan for Prey (Carnivores and aggressive Omnivores)
     if (diet >= 0.42 && env.creatureGrid) {
+      const isStarving = this.energy < this.maxEnergy * 0.25;
       const preyCandidates = env.creatureGrid.queryRadius(this.position.x, this.position.y, sense, (c) => {
         if (c === this || !c.isAlive) return false;
+        // Cleaners (symbiosis >= 0.6) are immune to predators unless predator is starving
+        if ((c.genome?.symbiosis ?? 0) >= 0.6 && !isStarving) return false;
         // Camouflage reduces effective perception range
         const camo = c.genome.camouflage ?? 0.25;
         const dist = this.position.dist(c.position);
@@ -2924,37 +3782,92 @@ class Creature {
    * @returns {Creature|null} Child creature if reproduction occurred this frame
    */
   update(dt, env) {
-    if (!this.isAlive) return null;
+    if (!this.isAlive) {
+      this.onDeath();
+      return null;
+    }
 
     this.age += dt;
 
     // Check natural death by old age
     if (this.age >= this.lifespan) {
-      this.isAlive = false;
-      this.causeOfDeath = 'old_age';
+      this.die('old_age');
       return null;
     }
 
-    // 1. Evaluate steering AI
-    if (env) {
+    // Parasite latching physics and energy siphoning
+    if (this.hostCreature) {
+      if (!this.hostCreature.isAlive) {
+        this.detachFromHost();
+      } else {
+        // Coordinate attachment position
+        const r = this.hostCreature.radius + this.radius * 0.5;
+        const angle = this.hostCreature.heading + this.parasiteOffsetAngle;
+        this.position.x = this.hostCreature.position.x + Math.cos(angle) * r;
+        this.position.y = this.hostCreature.position.y + Math.sin(angle) * r;
+        this.velocity.set(this.hostCreature.velocity.x, this.hostCreature.velocity.y);
+
+        // Siphon energy
+        const drain = 2.0 * dt;
+        const siphoned = Math.min(this.hostCreature.energy, drain);
+        this.hostCreature.energy -= siphoned;
+        this.energy = Math.min(this.maxEnergy, this.energy + siphoned * 0.8);
+
+        // Attached parasite skips autonomous steering locomotion
+        this.state = 'latched';
+        this.currentIntention = `Siphoning host [${this.hostCreature.genome?.speciesId ?? ''}]`;
+        const currentSpeed = this.velocity.mag();
+        this.distanceTraveled += currentSpeed * dt * 60.0;
+        this.heading = this.hostCreature.heading;
+        this.tailWiggle += dt * (this.tailWiggleSpeed + currentSpeed * 2.5);
+
+        // Primer metabolic cost while latched
+        const kineticMultiplier = env?.kineticMultiplier ?? 1.0;
+        const burnRate = this.calculateMetabolicCost(currentSpeed, false, kineticMultiplier);
+        this.energy -= burnRate * dt;
+        if (this.energy <= 0) {
+          this.energy = 0;
+          this.die('starvation');
+          return null;
+        }
+
+        if (this.mitosisTimer > 0) this.mitosisTimer -= dt;
+        if (this.matingCooldown > 0) this.matingCooldown -= dt;
+
+        // Asexual budding if energy exceeds threshold
+        if (this.energy >= this.reproductionThreshold && this.age > 4.0) {
+          return this.reproduceAsexual(env);
+        }
+
+        return null;
+      }
+    }
+
+    const isColonyMember = this.colony && this.colony.coreCell !== this;
+
+    // 1. Evaluate steering AI (skipped for member cells)
+    if (env && !isColonyMember) {
       this.evaluateBehavior(env);
       const boundaryForce = this.avoidBoundaries(env.worldWidth || 2400, env.worldHeight || 1600);
       this.applyForce(boundaryForce);
     }
 
     // 2. Integrate Physics (Verlet/Euler autonomous movement)
-    this.velocity.add(this.acceleration);
-    const maxSpd = (this.state === 'fleeing') ? this.genome.speed * 1.15 : this.genome.speed;
-    this.velocity.limit(maxSpd);
-    this.position.add(Vector2D.mult(this.velocity, dt * 60.0));
-    this.acceleration.set(0, 0);
+    if (!isColonyMember) {
+      this.velocity.add(this.acceleration);
+      const colonyMult = (this.colony && this.colony.coreCell === this) ? (this.colonySpeedMultiplier ?? this.speedMultiplier ?? 1.0) : 1.0;
+      const maxSpd = ((this.state === 'fleeing') ? this.genome.speed * 1.15 : this.genome.speed) * colonyMult;
+      this.velocity.limit(maxSpd);
+      this.position.add(Vector2D.mult(this.velocity, dt * 60.0));
+      this.acceleration.set(0, 0);
 
-    // Hard boundary clamp safety
-    if (env) {
-      const w = env.worldWidth || 2400;
-      const h = env.worldHeight || 1600;
-      this.position.x = clamp(this.position.x, this.radius, w - this.radius);
-      this.position.y = clamp(this.position.y, this.radius, h - this.radius);
+      // Hard boundary clamp safety
+      if (env) {
+        const w = env.worldWidth || 2400;
+        const h = env.worldHeight || 1600;
+        this.position.x = clamp(this.position.x, this.radius, w - this.radius);
+        this.position.y = clamp(this.position.y, this.radius, h - this.radius);
+      }
     }
 
     // 3. Smooth Heading & Squish Factor
@@ -2962,12 +3875,14 @@ class Creature {
     this.distanceTraveled += currentSpeed * dt * 60.0;
 
     if (currentSpeed > 0.05) {
-      const targetHeading = this.velocity.heading();
-      // Smooth angle interpolation
-      let diff = targetHeading - this.heading;
-      while (diff < -Math.PI) diff += Math.PI * 2;
-      while (diff > Math.PI) diff -= Math.PI * 2;
-      this.heading += diff * clamp(dt * 12.0, 0, 1);
+      if (!isColonyMember) {
+        const targetHeading = this.velocity.heading();
+        // Smooth angle interpolation
+        let diff = targetHeading - this.heading;
+        while (diff < -Math.PI) diff += Math.PI * 2;
+        while (diff > Math.PI) diff -= Math.PI * 2;
+        this.heading += diff * clamp(dt * 12.0, 0, 1);
+      }
 
       // Organic tail oscillation
       this.tailWiggle += dt * (this.tailWiggleSpeed + currentSpeed * 2.5);
@@ -2987,16 +3902,52 @@ class Creature {
       this.matingCooldown -= dt;
     }
 
+    // 3.5 Dynamic Chromatophore Camouflage Blending
+    if (env && typeof env.getBiomeAt === 'function') {
+      if (!this.chromatophoreColor) {
+        const initRgb = getInitialGenomeRgb(this.genome);
+        this._baseGenomeRgb = { ...initRgb };
+        this.chromatophoreColor = { ...initRgb };
+      }
+      const biome = env.getBiomeAt(this.position.x, this.position.y);
+      const biomeId = typeof biome === 'string' ? biome : biome?.id;
+      let targetRgb;
+      switch (biomeId) {
+        case 'oasis':
+          targetRgb = { r: 34, g: 197, b: 94 };
+          break;
+        case 'desert':
+          targetRgb = { r: 245, g: 158, b: 11 };
+          break;
+        case 'marsh':
+          targetRgb = { r: 56, g: 189, b: 248 };
+          break;
+        case 'volcanic':
+          targetRgb = { r: 239, g: 68, b: 68 };
+          break;
+        default:
+          targetRgb = this._baseGenomeRgb || { r: 120, g: 140, b: 200 };
+          break;
+      }
+
+      const chromatophoreGene = this.genome?.chromatophore ?? 0.0;
+      const t = clamp(chromatophoreGene * dt * 2.0, 0.0, 1.0);
+      if (t > 0) {
+        this.chromatophoreColor.r = lerp(this.chromatophoreColor.r, targetRgb.r, t);
+        this.chromatophoreColor.g = lerp(this.chromatophoreColor.g, targetRgb.g, t);
+        this.chromatophoreColor.b = lerp(this.chromatophoreColor.b, targetRgb.b, t);
+      }
+    }
+
     // 4. Burn Primer Metabolic Energy
-    const isHunting = this.state === 'hunting' || this.state === 'fleeing';
+    const isHunting = this.state === 'hunting' || this.state === 'fleeing' || (this.brainType === 'neural' && (this.lastNeuralOutputs?.[3] ?? 0) > 0.45);
     const kineticMultiplier = env?.kineticMultiplier ?? 1.0;
     const burnRate = this.calculateMetabolicCost(currentSpeed, isHunting, kineticMultiplier);
     this.energy -= burnRate * dt;
 
     if (this.energy <= 0) {
       this.energy = 0;
-      this.isAlive = false;
-      this.causeOfDeath = 'starvation';
+      this.die('starvation');
       return null;
     }
 
@@ -3031,114 +3982,171 @@ class Creature {
       }
     }
 
-    // 6. Predation: Carnivore Attacks Prey
-    if (this.state === 'hunting' && this.currentTarget && this.currentTarget.isAlive) {
-      const prey = this.currentTarget;
-      const dSq = this.position.distSq(prey.position);
-      const attackRange = this.radius + prey.radius * 0.8;
-
-      if (dSq <= attackRange * attackRange) {
-        // Prey armor mitigates predator yield
-        const preyArmor = prey.genome.armor ?? 0.2;
-        const armorMultiplier = clamp(1.0 - preyArmor * 0.50, 0.40, 1.0);
-
-        // Prey retaliation check: brave/large prey inflicts counter-damage on attacker
-        const preyDefense = prey.genome.size * (prey.genome.bravery ?? 0.5);
-        const predatorAttack = this.genome.size * (this.genome.bravery ?? 0.5);
-        if (preyDefense > predatorAttack * 0.75) {
-          const retaliation = clamp((preyDefense / predatorAttack) * 16, 4, 30);
-          this.energy -= retaliation;
-          if (env && env.addFloatingText) {
-            env.addFloatingText(this.position.x, this.position.y - 12, 'DEFENDED!', '#f59e0b');
+    // 5.5 Parasite Latching & Cleaner Mutualism on Contact
+    if (!this.hostCreature && this.isParasite && env && env.creatureGrid) {
+      const nearbyHosts = env.creatureGrid.queryRadius(this.position.x, this.position.y, this.radius + 30, (c) => {
+        return c !== this && c.isAlive && (c.genome?.size ?? 0) > this.genome.size * 1.35;
+      });
+      for (const host of nearbyHosts) {
+        const dist = this.position.dist(host.position);
+        if (dist <= this.radius + host.radius + 3) {
+          if (this.attachToHost(host)) {
+            this.currentTarget = null;
+            this.state = 'latched';
+            break;
           }
         }
+      }
+    }
 
-        // Successful hunt! Kill prey
-        prey.isAlive = false;
-        prey.causeOfDeath = 'predation';
-        this.kills++;
-
-        // Drop danger pheromone
-        if (env && env.addPheromone) {
-          env.addPheromone(prey.position.x, prey.position.y, 'danger', 1.0, 5.0);
+    if (this.isCleaner && env && env.creatureGrid) {
+      const infestedNearby = env.creatureGrid.queryRadius(this.position.x, this.position.y, this.radius + 40, (c) => {
+        return c !== this && c.isAlive && c.attachedParasites && c.attachedParasites.length > 0;
+      });
+      for (const host of infestedNearby) {
+        const dist = this.position.dist(host.position);
+        if (dist <= this.radius + host.radius + 6) {
+          if (host.attachedParasites && host.attachedParasites.length > 0) {
+            this.groomParasite(host.attachedParasites[0]);
+            break;
+          }
         }
+      }
+    }
 
-        // Carnivore consumes meat proportional to prey mass & remaining energy
-        const preyYield = Math.min(prey.maxEnergy * 0.75, (prey.energy + prey.genome.size * 10) * armorMultiplier);
-        this.energy = Math.min(this.maxEnergy, this.energy + preyYield);
+    // 6. Predation: Carnivore Attacks Prey
+    const wantsHunt = !this.hostCreature && (this.state === 'hunting' || (this.brainType === 'neural' && (this.lastNeuralOutputs?.[3] ?? 0) > 0.45 && this.genome.diet >= 0.42));
+    if (wantsHunt && this.currentTarget && this.currentTarget !== this.hostCreature && this.currentTarget.isAlive) {
+      const prey = this.currentTarget;
+      const isStarving = this.energy < this.maxEnergy * 0.25;
+      if ((prey.genome?.symbiosis ?? 0) >= 0.6 && !isStarving) {
+        this.currentTarget = null;
+      } else {
+        const dSq = this.position.distSq(prey.position);
+        const attackRange = this.radius + prey.radius * 0.8;
 
-        // Drop remaining flesh as meat pellet for scavengers
-        if (env && env.foodManager) {
-          env.foodManager.spawnMeat(prey.position, preyYield * 0.4, prey.genome.size);
+        if (dSq <= attackRange * attackRange) {
+          // Prey armor mitigates predator yield
+          const preyArmor = prey.genome.armor ?? 0.2;
+          const armorMultiplier = clamp(1.0 - preyArmor * 0.50, 0.40, 1.0);
+
+          // Prey retaliation check: brave/large prey inflicts counter-damage on attacker
+          const preyDefense = prey.genome.size * (prey.genome.bravery ?? 0.5);
+          const predatorAttack = this.genome.size * (this.genome.bravery ?? 0.5);
+          if (preyDefense > predatorAttack * 0.75) {
+            const retaliation = clamp((preyDefense / predatorAttack) * 16, 4, 30);
+            this.takeDamage(retaliation);
+            if (env && env.addFloatingText) {
+              env.addFloatingText(this.position.x, this.position.y - 12, 'DEFENDED!', '#f59e0b');
+            }
+          }
+
+          // Successful hunt! Kill prey
+          prey.die('predation');
+          this.kills++;
+
+          // Drop danger pheromone
+          if (env && env.addPheromone) {
+            env.addPheromone(prey.position.x, prey.position.y, 'danger', 1.0, 5.0);
+          }
+
+          // Carnivore consumes meat proportional to prey mass & remaining energy
+          const preyYield = Math.min(prey.maxEnergy * 0.75, (prey.energy + prey.genome.size * 10) * armorMultiplier);
+          this.energy = Math.min(this.maxEnergy, this.energy + preyYield);
+
+          // Drop remaining flesh as meat pellet for scavengers
+          if (env && env.foodManager) {
+            env.foodManager.spawnMeat(prey.position, preyYield * 0.4, prey.genome.size);
+          }
         }
       }
     }
 
     // 6.5 Sexual Reproduction (Courtship Encounter)
-    if (this.state === 'courtship' && this.courtshipTarget && this.courtshipTarget.isAlive) {
+    const wantsCourt = this.state === 'courtship' || (this.brainType === 'neural' && (this.lastNeuralOutputs?.[2] ?? 0) > 0.45);
+    if (wantsCourt && this.courtshipTarget && this.courtshipTarget.isAlive) {
       const partner = this.courtshipTarget;
       const dSq = this.position.distSq(partner.position);
       const contactDist = this.radius + partner.radius + 10;
       if (dSq <= contactDist * contactDist && partner.matingCooldown <= 0 && this.matingCooldown <= 0) {
-        const childGenome = this.genome.crossover(partner.genome);
-        const splitEnergy = (this.energy * 0.28) + (partner.energy * 0.28);
-        this.energy = Math.max(20, this.energy * 0.72);
-        partner.energy = Math.max(20, partner.energy * 0.72);
-        this.matingCooldown = 7.0;
-        partner.matingCooldown = 7.0;
-        this.offspringCount++;
-        partner.offspringCount++;
-        this.mitosisTimer = 0.5;
-        partner.mitosisTimer = 0.5;
-
-        const childX = (this.position.x + partner.position.x) / 2;
-        const childY = (this.position.y + partner.position.y) / 2;
-        const child = new Creature(childX, childY, childGenome, splitEnergy);
-        child.parentAId = this.id;
-        child.parentBId = partner.id;
-        child.reproductionType = 'sexual';
-        child.mitosisTimer = 0.5;
-        this.courtshipTarget = null;
-        partner.courtshipTarget = null;
-
-        if (env && env.addPheromone) {
-          env.addPheromone(childX, childY, 'mating', 1.0, 5.0);
-        }
-        if (env && env.addFloatingText) {
-          env.addFloatingText(childX, childY - 14, '💕 MATED!', '#ec4899');
-        }
-        return child;
+        return this.reproduceSexual(partner, env);
       }
     }
 
     // 7. Reproduction (Asexual Budding with Genetic Drift)
     // Creature splits when well-fed, passing half its energy minus metabolic birth tax
     if (this.energy >= this.reproductionThreshold && this.age > 4.0) {
-      const mutMult = env?.mutationMultiplier ?? 1.0;
-      const childGenome = this.genome.mutate(mutMult);
-
-      // Energy split: each retains ~42% of parent energy (16% tax for birth metabolism)
-      const childEnergy = (this.energy - this.birthEnergyTax) * 0.48;
-      this.energy = (this.energy - this.birthEnergyTax) * 0.48;
-      this.offspringCount++;
-
-      // Trigger visual mitosis squeeze/pinch animation
-      this.mitosisTimer = 0.45;
-
-      // Spawn child slightly behind parent
-      const spawnOffset = Vector2D.fromAngle(this.heading + Math.PI + randomFloat(-0.6, 0.6), this.radius * 2.2);
-      const childX = this.position.x + spawnOffset.x;
-      const childY = this.position.y + spawnOffset.y;
-
-      const child = new Creature(childX, childY, childGenome, childEnergy);
-      child.parentAId = this.id;
-      child.parentBId = null;
-      child.reproductionType = 'asexual';
-      child.mitosisTimer = 0.45;
-      return child;
+      return this.reproduceAsexual(env);
     }
 
     return null;
+  }
+
+  /**
+   * Sexual reproduction encounter with a mate: performs crossover and instantiates offspring.
+   * @param {Creature} partner 
+   * @param {Object} [env=null] 
+   * @returns {Creature} Offspring
+   */
+  reproduceSexual(partner, env = null) {
+    const childGenome = this.genome.crossover(partner.genome);
+    const splitEnergy = (this.energy * 0.28) + (partner.energy * 0.28);
+    this.energy = Math.max(20, this.energy * 0.72);
+    partner.energy = Math.max(20, partner.energy * 0.72);
+    this.matingCooldown = 7.0;
+    partner.matingCooldown = 7.0;
+    this.offspringCount++;
+    partner.offspringCount++;
+    this.mitosisTimer = 0.5;
+    partner.mitosisTimer = 0.5;
+
+    const childX = (this.position.x + partner.position.x) / 2;
+    const childY = (this.position.y + partner.position.y) / 2;
+    const child = new Creature(childX, childY, childGenome, splitEnergy);
+    child.parentAId = this.id;
+    child.parentBId = partner.id;
+    child.reproductionType = 'sexual';
+    child.mitosisTimer = 0.5;
+    this.courtshipTarget = null;
+    partner.courtshipTarget = null;
+
+    if (env && env.addPheromone) {
+      env.addPheromone(childX, childY, 'mating', 1.0, 5.0);
+    }
+    if (env && env.addFloatingText) {
+      env.addFloatingText(childX, childY - 14, '💕 MATED!', '#ec4899');
+    }
+    return child;
+  }
+
+  /**
+   * Asexual budding reproduction: mutates genome and instantiates offspring.
+   * @param {Object} [env=null] 
+   * @returns {Creature} Offspring
+   */
+  reproduceAsexual(env = null) {
+    const mutMult = env?.mutationMultiplier ?? 1.0;
+    const childGenome = this.genome.mutate(mutMult);
+
+    // Energy split: each retains ~42% of parent energy (16% tax for birth metabolism)
+    const childEnergy = (this.energy - this.birthEnergyTax) * 0.48;
+    this.energy = (this.energy - this.birthEnergyTax) * 0.48;
+    this.offspringCount++;
+
+    // Trigger visual mitosis squeeze/pinch animation
+    this.mitosisTimer = 0.45;
+
+    // Spawn child slightly behind parent
+    const spawnOffset = Vector2D.fromAngle(this.heading + Math.PI + randomFloat(-0.6, 0.6), this.radius * 2.2);
+    const childX = this.position.x + spawnOffset.x;
+    const childY = this.position.y + spawnOffset.y;
+
+    const child = new Creature(childX, childY, childGenome, childEnergy);
+    child.parentAId = this.id;
+    child.parentBId = null;
+    child.reproductionType = 'asexual';
+    child.mitosisTimer = 0.45;
+    return child;
   }
 
   /**
@@ -3228,15 +4236,83 @@ class Creature {
     }
 
     // Main Body
+    const bodyFill = (this.genome?.chromatophore > 0.05) ? this.effectiveColorCss : colorInfo.bodyCss;
     ctx.beginPath();
     ctx.arc(0, 0, r, 0, Math.PI * 2);
-    ctx.fillStyle = colorInfo.bodyCss;
+    ctx.fillStyle = bodyFill;
     ctx.fill();
 
     // Membrane Stroke
     ctx.lineWidth = Math.max(1.5, r * 0.16);
     ctx.strokeStyle = isSelected ? '#38bdf8' : colorInfo.strokeCss;
     ctx.stroke();
+
+    // Host distress indicators when parasites are attached
+    if (this.attachedParasites && this.attachedParasites.length > 0) {
+      ctx.save();
+      const dotCount = Math.min(8, this.attachedParasites.length * 3);
+      const orbitR = r + 6 + Math.sin(this.age * 8.0) * 2;
+      ctx.fillStyle = '#ef4444';
+      for (let i = 0; i < dotCount; i++) {
+        const dotAngle = (i / dotCount) * Math.PI * 2 + this.age * 3.0;
+        const dx = Math.cos(dotAngle) * orbitR;
+        const dy = Math.sin(dotAngle) * orbitR;
+        ctx.beginPath();
+        ctx.arc(dx, dy, Math.max(1.5, r * 0.12), 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+
+    // Parasite latching tendrils / gripping claws
+    if (this.hostCreature) {
+      ctx.save();
+      ctx.strokeStyle = '#ef4444';
+      ctx.fillStyle = '#b91c1c';
+      ctx.lineWidth = Math.max(1.2, r * 0.22);
+      ctx.lineCap = 'round';
+      for (const side of [-1, 1]) {
+        ctx.beginPath();
+        ctx.moveTo(r * 0.6, side * r * 0.35);
+        ctx.quadraticCurveTo(r * 1.3, side * r * 0.65, r * 1.5, side * r * 0.15);
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.arc(r * 1.5, side * r * 0.15, Math.max(1.2, r * 0.18), 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+
+    // Distinctive Aposematic Warning Bands (yellow and black)
+    if (this.aposematicWarningLevel > 0.35) {
+      ctx.save();
+      const pulse = 1.0 + Math.sin(this.age * 4.0) * 0.08;
+      const ringRadius = Math.max(2.0, r * 0.72 * pulse);
+      const bandWidth = Math.max(2.0, r * 0.18);
+
+      // Warning Ring 1: High-contrast yellow
+      ctx.beginPath();
+      ctx.arc(0, 0, ringRadius, 0, Math.PI * 2);
+      ctx.strokeStyle = '#facc15';
+      ctx.lineWidth = bandWidth;
+      if (typeof ctx.setLineDash === 'function') {
+        ctx.setLineDash([Math.max(2, r * 0.45), Math.max(2, r * 0.30)]);
+      }
+      ctx.stroke();
+
+      // Warning Ring 2: Interleaved obsidian black
+      ctx.beginPath();
+      ctx.arc(0, 0, Math.max(1.0, ringRadius - bandWidth * 0.75), 0, Math.PI * 2);
+      ctx.strokeStyle = '#09090b';
+      ctx.lineWidth = Math.max(1.5, bandWidth * 0.65);
+      if (typeof ctx.setLineDash === 'function') {
+        ctx.setLineDash([Math.max(2, r * 0.30), Math.max(2, r * 0.45)]);
+      }
+      ctx.stroke();
+
+      ctx.restore();
+    }
 
     // Reset squash scale for feature details (eyes, mouth)
     ctx.scale(1.0 / squishX, 1.0 / squishY);
@@ -3403,11 +4479,424 @@ class Creature {
   }
 
   /**
+   * Attaches this parasite to a target host organism.
+   * @param {Creature} host Host organism to latch onto
+   * @returns {boolean} Whether attachment succeeded
+   */
+  attachToHost(host) {
+    if (!this.isAlive || this.hostCreature) return false;
+    if (!host || !host.isAlive || host === this) return false;
+    if (this.genome.size >= host.genome.size * 0.80) return false;
+
+    this.hostCreature = host;
+    if (!host.attachedParasites) {
+      host.attachedParasites = [];
+    }
+    if (!host.attachedParasites.includes(this)) {
+      host.attachedParasites.push(this);
+    }
+    this.parasiteOffsetAngle = Math.random() * Math.PI * 2;
+    return true;
+  }
+
+  /**
+   * Detaches this creature from its currently attached host organism.
+   */
+  detachFromHost() {
+    if (this.hostCreature) {
+      if (this.hostCreature.attachedParasites) {
+        const idx = this.hostCreature.attachedParasites.indexOf(this);
+        if (idx !== -1) {
+          this.hostCreature.attachedParasites.splice(idx, 1);
+        }
+      }
+      this.hostCreature = null;
+    }
+  }
+
+  /**
+   * Detaches all parasites currently attached to this host organism.
+   */
+  detachAllParasites() {
+    if (this.attachedParasites && this.attachedParasites.length > 0) {
+      const list = [...this.attachedParasites];
+      for (let i = 0; i < list.length; i++) {
+        list[i].detachFromHost();
+      }
+    }
+  }
+
+  /**
+   * Cleaner mutualist grooms a parasite off a host creature.
+   * @param {Creature} parasite Latched parasite to groom off
+   * @returns {number} Energy gained by the cleaner
+   */
+  groomParasite(parasite) {
+    if (!parasite || !parasite.hostCreature || !this.isAlive) return 0;
+    parasite.detachFromHost();
+    const gained = Math.min(25, parasite.energy * 0.6 + 5);
+    this.energy = Math.min(this.maxEnergy, this.energy + gained);
+    parasite.energy = Math.max(0, parasite.energy - gained);
+    if (parasite.energy <= 0) {
+      parasite.die('predation');
+    } else {
+      const repel = Vector2D.sub(parasite.position, this.position).normalize();
+      if (repel.magSq() < 0.001) {
+        repel.set(Math.cos(this.heading), Math.sin(this.heading));
+      }
+      parasite.velocity.add(repel.mult(this.genome.speed * 0.8));
+    }
+    return gained;
+  }
+
+  /**
+   * Applies damage to this creature, mitigating 60% if protected by colony armor cells.
+   * @param {number} amt Raw incoming damage
+   * @returns {number} Actual damage inflicted
+   */
+  takeDamage(amt) {
+    if (amt <= 0 || !this.isAlive) return 0;
+    let finalDamage = amt;
+    if (this.colony && this.colony.cells.some(c => c.colonyRole === 'armor')) {
+      finalDamage *= 0.40; // 60% damage mitigation
+    }
+    this.energy -= finalDamage;
+    if (this.energy <= 0) {
+      this.energy = 0;
+      this.die('predation');
+    }
+    return finalDamage;
+  }
+
+  /**
+   * Handles organism demise, cleanly detaching all symbiotic links.
+   * @param {string} [cause='natural'] Cause of death
+   */
+  die(cause = 'natural') {
+    if (!this.isAlive) return;
+    this.isAlive = false;
+    this.causeOfDeath = cause;
+    this.onDeath();
+  }
+
+  /**
+   * Cleans up symbiotic attachments and colony membership when this organism ceases living.
+   */
+  onDeath() {
+    if (this.hostCreature) {
+      this.detachFromHost();
+    }
+    this.detachAllParasites();
+    if (this.colony) {
+      this.colony.removeCell(this);
+    }
+  }
+
+  /**
    * God-mode: Instantly kills creature.
    */
   kill() {
-    this.isAlive = false;
-    this.causeOfDeath = 'smite';
+    this.die('smite');
+  }
+}
+
+
+/* --- src/colony.js --- */
+/**
+ * Artificial Life Simulator - Multicellular Colony Coordinator & Cellular Differentiation
+ * Implements multicellular super-organisms with specialized differentiated cell roles
+ * ('mouth', 'motor', 'armor'), shared energy pooling, coordinated polar movement locking,
+ * and asexual offshoot fission.
+ */
+
+
+
+let NEXT_COLONY_ID = 1;
+
+/**
+ * Standard relative polar offsets for member cells 1..5 relative to coreCell (index 0).
+ */
+const MEMBER_ROLE_CONFIGS = [
+  { role: 'motor', angle: Math.PI, distMult: 1.8 },
+  { role: 'armor', angle: -Math.PI / 2, distMult: 1.8 },
+  { role: 'armor', angle: Math.PI / 2, distMult: 1.8 },
+  { role: 'motor', angle: (3 * Math.PI) / 4, distMult: 2.2 },
+  { role: 'motor', angle: (-3 * Math.PI) / 4, distMult: 2.2 }
+];
+
+class Colony {
+  /**
+   * @param {Creature[]} [cells=[]] Initial member organisms
+   */
+  constructor(cells = []) {
+    this.id = NEXT_COLONY_ID++;
+    this.cells = [];
+    this.coreCell = null;
+    this.speedMultiplier = 1.0;
+
+    for (const cell of cells) {
+      this.addCell(cell);
+    }
+  }
+
+  /**
+   * Appends an organism to the colony if capacity (< 6) and not already in a colony.
+   * @param {Creature} creature 
+   * @returns {boolean} True if successfully added
+   */
+  addCell(creature) {
+    if (!creature || creature.colony || this.cells.length >= 6) {
+      return false;
+    }
+    this.cells.push(creature);
+    creature.colony = this;
+    if (!this.coreCell) {
+      this.coreCell = creature;
+    }
+    this.recalculateRoles();
+    return true;
+  }
+
+  /**
+   * Removes an organism from the colony, reassigning core and recalculating roles,
+   * or dissolving if <= 1 cell remains.
+   * @param {Creature} creature 
+   * @returns {boolean} True if removed
+   */
+  removeCell(creature) {
+    const idx = this.cells.indexOf(creature);
+    if (idx === -1) return false;
+
+    this.cells.splice(idx, 1);
+    creature.colony = null;
+    creature.colonyRole = null;
+    creature.colonyAngleOffset = 0;
+    creature.colonyDistOffset = 0;
+
+    if (creature === this.coreCell) {
+      if (this.cells.length > 0) {
+        const living = this.cells.filter(c => c.isAlive);
+        const candidates = living.length > 0 ? living : this.cells;
+        candidates.sort((a, b) => {
+          const sizeA = a.radius ?? a.genome?.size ?? 0;
+          const sizeB = b.radius ?? b.genome?.size ?? 0;
+          return sizeB - sizeA;
+        });
+        this.coreCell = candidates[0] || null;
+      } else {
+        this.coreCell = null;
+      }
+    }
+
+    if (this.cells.length <= 1) {
+      if (this.cells.length === 1) {
+        const remaining = this.cells[0];
+        remaining.colony = null;
+        remaining.colonyRole = null;
+        remaining.colonyAngleOffset = 0;
+        remaining.colonyDistOffset = 0;
+      }
+      this.cells = [];
+      this.coreCell = null;
+    } else {
+      this.recalculateRoles();
+    }
+
+    return true;
+  }
+
+  /**
+   * Recalculates specialized cellular roles and polar position offsets.
+   */
+  recalculateRoles() {
+    if (this.cells.length === 0) return;
+
+    if (!this.coreCell || !this.cells.includes(this.coreCell)) {
+      const living = this.cells.filter(c => c.isAlive);
+      const candidates = living.length > 0 ? living : this.cells;
+      candidates.sort((a, b) => {
+        const sizeA = a.radius ?? a.genome?.size ?? 0;
+        const sizeB = b.radius ?? b.genome?.size ?? 0;
+        return sizeB - sizeA;
+      });
+      this.coreCell = candidates[0];
+    }
+
+    // Core Cell: Mouth / Navigation leader
+    this.coreCell.colonyRole = 'mouth';
+    this.coreCell.colonyAngleOffset = 0;
+    this.coreCell.colonyDistOffset = 0;
+
+    // Remaining cells 1..N-1: Specialized peripheral roles
+    const otherCells = this.cells.filter(c => c !== this.coreCell);
+    for (let i = 0; i < otherCells.length; i++) {
+      const member = otherCells[i];
+      const cfg = MEMBER_ROLE_CONFIGS[i] || { role: 'motor', angle: Math.PI, distMult: 2.0 };
+      member.colonyRole = cfg.role;
+      member.colonyAngleOffset = cfg.angle;
+      member.colonyDistOffset = this.coreCell.radius * cfg.distMult;
+
+      // Synchronize polar coordinates immediately
+      const worldAngle = this.coreCell.heading + member.colonyAngleOffset;
+      member.position.x = this.coreCell.position.x + Math.cos(worldAngle) * member.colonyDistOffset;
+      member.position.y = this.coreCell.position.y + Math.sin(worldAngle) * member.colonyDistOffset;
+      member.heading = this.coreCell.heading;
+      if (member.velocity && this.coreCell.velocity) {
+        member.velocity.set(this.coreCell.velocity.x, this.coreCell.velocity.y);
+      }
+    }
+  }
+
+  /**
+   * Main colony tick: prunes dead cells, pools energy, synchronizes locomotion,
+   * and triggers offshoot splitting if saturated.
+   * @param {number} dt Delta time
+   * @param {Object} [env=null] Environment telemetry
+   * @returns {Creature|null} Split offshoot child if one was detached
+   */
+  update(dt, env = null) {
+    // 1. Prune dead cells
+    for (let i = this.cells.length - 1; i >= 0; i--) {
+      const c = this.cells[i];
+      if (!c.isAlive) {
+        this.removeCell(c);
+      }
+    }
+
+    // 2. Dissolve colony if <= 1 cell left
+    if (this.cells.length <= 1) {
+      if (this.cells.length === 1) {
+        const remaining = this.cells[0];
+        remaining.colony = null;
+        remaining.colonyRole = null;
+        remaining.colonyAngleOffset = 0;
+        remaining.colonyDistOffset = 0;
+        this.cells = [];
+        this.coreCell = null;
+      }
+      return null;
+    }
+
+    // 3. Energy Pooling: sum and divide total energy evenly
+    let totalEnergy = 0;
+    for (const c of this.cells) {
+      totalEnergy += c.energy;
+    }
+    const pooledEnergy = totalEnergy / this.cells.length;
+    for (const c of this.cells) {
+      c.energy = pooledEnergy;
+    }
+
+    // 4. Locomotion & Coordination: motor cell speed boost and rigid polar positioning
+    const motorCount = this.cells.filter(c => c.colonyRole === 'motor').length;
+    this.speedMultiplier = 1.0 + motorCount * 0.25;
+
+    if (this.coreCell) {
+      this.coreCell.colonySpeedMultiplier = this.speedMultiplier;
+      this.coreCell.speedMultiplier = this.speedMultiplier;
+
+      for (const c of this.cells) {
+        if (c === this.coreCell) continue;
+        const worldAngle = this.coreCell.heading + c.colonyAngleOffset;
+        c.position.x = this.coreCell.position.x + Math.cos(worldAngle) * c.colonyDistOffset;
+        c.position.y = this.coreCell.position.y + Math.sin(worldAngle) * c.colonyDistOffset;
+        c.heading = this.coreCell.heading;
+        if (c.velocity && this.coreCell.velocity) {
+          c.velocity.set(this.coreCell.velocity.x, this.coreCell.velocity.y);
+        }
+      }
+    }
+
+    // 5. Offshoot Splitting: Saturated colony produces independent offspring
+    if (this.cells.length >= 6 && totalEnergy > 800) {
+      return this.splitOffshoot();
+    }
+
+    return null;
+  }
+
+  /**
+   * Detaches the last peripheral cell from the colony with starting fuel.
+   * @returns {Creature|null} Detached child creature
+   */
+  splitOffshoot() {
+    if (this.cells.length <= 1) return null;
+    const child = this.cells[this.cells.length - 1];
+    this.removeCell(child);
+    child.energy = 50;
+    return child;
+  }
+
+  /**
+   * Renders glowing cytoplasmic bridges and differentiated role badges.
+   * @param {CanvasRenderingContext2D} ctx 
+   */
+  draw(ctx) {
+    if (!ctx || !this.coreCell || this.cells.length <= 1) return;
+
+    // 1. Glowing bioluminescent cytoplasmic bridges
+    for (const c of this.cells) {
+      if (c === this.coreCell || !c.isAlive) continue;
+      if (ctx.save) ctx.save();
+
+      // Outer cytoplasmic tether
+      if (ctx.beginPath) ctx.beginPath();
+      if (ctx.moveTo) ctx.moveTo(this.coreCell.position.x, this.coreCell.position.y);
+      if (ctx.lineTo) ctx.lineTo(c.position.x, c.position.y);
+      ctx.strokeStyle = 'rgba(56, 189, 248, 0.45)';
+      ctx.lineWidth = Math.max(3, Math.min(this.coreCell.radius, c.radius) * 0.45);
+      ctx.lineCap = 'round';
+      if (ctx.stroke) ctx.stroke();
+
+      // Inner nutrient canal
+      if (ctx.beginPath) ctx.beginPath();
+      if (ctx.moveTo) ctx.moveTo(this.coreCell.position.x, this.coreCell.position.y);
+      if (ctx.lineTo) ctx.lineTo(c.position.x, c.position.y);
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
+      ctx.lineWidth = Math.max(1, ctx.lineWidth * 0.3);
+      if (ctx.stroke) ctx.stroke();
+
+      if (ctx.restore) ctx.restore();
+    }
+
+    // 2. Specialized role badges
+    for (const c of this.cells) {
+      if (!c.isAlive) continue;
+      if (ctx.save) ctx.save();
+
+      if (c.colonyRole === 'mouth') {
+        // 'mouth': Glowing feeding corona ring around core
+        if (ctx.beginPath) ctx.beginPath();
+        if (ctx.arc) ctx.arc(c.position.x, c.position.y, c.radius + 3.5, 0, Math.PI * 2);
+        ctx.strokeStyle = 'rgba(244, 63, 94, 0.85)';
+        ctx.lineWidth = 2.5;
+        if (ctx.stroke) ctx.stroke();
+      } else if (c.colonyRole === 'armor') {
+        // 'armor': Defensive blue chitin shield arc
+        if (ctx.beginPath) ctx.beginPath();
+        const heading = c.heading || 0;
+        if (ctx.arc) ctx.arc(c.position.x, c.position.y, c.radius + 4, heading - Math.PI / 2, heading + Math.PI / 2);
+        ctx.strokeStyle = 'rgba(148, 163, 184, 0.7)';
+        ctx.lineWidth = 3.5;
+        ctx.lineCap = 'round';
+        if (ctx.stroke) ctx.stroke();
+      } else if (c.colonyRole === 'motor') {
+        // 'motor': Elongated flagella tails
+        const heading = c.heading || 0;
+        const tailAngle = heading + Math.PI;
+        const tailLen = c.radius * 2.2;
+        if (ctx.beginPath) ctx.beginPath();
+        if (ctx.moveTo) ctx.moveTo(c.position.x, c.position.y);
+        if (ctx.lineTo) {
+          ctx.lineTo(c.position.x + Math.cos(tailAngle) * tailLen, c.position.y + Math.sin(tailAngle) * tailLen);
+        }
+        ctx.strokeStyle = 'rgba(56, 189, 248, 0.75)';
+        ctx.lineWidth = 2.0;
+        if (ctx.stroke) ctx.stroke();
+      }
+
+      if (ctx.restore) ctx.restore();
+    }
   }
 }
 
@@ -3418,6 +4907,7 @@ class Creature {
  * Implements Lotka-Volterra dynamics, continuous phylogenetic speciation,
  * extinction tracking, climate/seasonal temperature oscillations, and disaster events.
  */
+
 
 
 
@@ -3454,6 +4944,9 @@ class World {
 
     /** @type {Creature[]} */
     this.creatures = [];
+
+    /** @type {Colony[]} */
+    this.colonies = [];
 
     // Ecosystem & Climate Dynamics
     this.time = 0; // Simulation time in seconds
@@ -3600,6 +5093,7 @@ class World {
    */
   populateInitial(herbivores, carnivores, omnivores) {
     this.creatures = [];
+    this.colonies = [];
     this.creatureGrid.clear();
     this.speciesRegistry.clear();
 
@@ -3644,6 +5138,7 @@ class World {
    */
   loadPreset(presetName) {
     this.creatures = [];
+    this.colonies = [];
     this.creatureGrid.clear();
     this.foodManager.clear();
     this.speciesRegistry.clear();
@@ -4169,8 +5664,12 @@ class World {
 
       if (damageFactor > 0.45) {
         // Direct incineration / lethal blast
-        c.isAlive = false;
-        c.causeOfDeath = 'disaster';
+        if (typeof c.die === 'function') {
+          c.die('disaster');
+        } else {
+          c.isAlive = false;
+          c.causeOfDeath = 'disaster';
+        }
         casualties++;
         // Drop charred meat
         this.foodManager.spawnMeat(c.position, c.genome.size * 5, c.genome.size);
@@ -4226,8 +5725,12 @@ class World {
       if (roll < virulence) {
         c.energy *= 0.35;
         if (roll < virulence * 0.6) {
-          c.isAlive = false;
-          c.causeOfDeath = 'epidemic';
+          if (typeof c.die === 'function') {
+            c.die('epidemic');
+          } else {
+            c.isAlive = false;
+            c.causeOfDeath = 'epidemic';
+          }
           victims++;
           this.foodManager.spawnMeat(c.position, c.genome.size * 6, c.genome.size);
         }
@@ -4383,6 +5886,7 @@ class World {
       mutationMultiplier: this.mutationMultiplier,
       isNight: this.isNight,
       solarIntensity: this.solarIntensity,
+      getBiomeAt: (x, y) => this.getBiomeAt(x, y),
       addPheromone: (x, y, t, s, d) => this.addPheromone(x, y, t, s, d),
       addFloatingText: (x, y, txt, col) => this.addFloatingText(x, y, txt, col)
     };
@@ -4426,6 +5930,9 @@ class World {
       }
 
       if (!c.isAlive) {
+        if (typeof c.onDeath === 'function') {
+          c.onDeath();
+        }
         this.creatureGrid.remove(c);
         // Spawn decaying carcass if died naturally or of famine
         if (c.causeOfDeath !== 'predation' && c.causeOfDeath !== 'disaster') {
@@ -4461,6 +5968,64 @@ class World {
       this.creatureGrid.insert(child);
       this.registerCreatureSpecies(child, child.genome.speciesId);
     }
+
+    // 5.5 Multicellular Colony Formation & Coordination
+    for (let i = 0; i < this.creatures.length; i++) {
+      const c = this.creatures[i];
+      if (!c.isAlive) continue;
+      if ((c.genome?.adhesion ?? 0) < 0.5) continue;
+      if (c.colony && c.colony.cells.length >= 6) continue;
+
+      let candidates = [];
+      if (this.creatureGrid) {
+        candidates = this.creatureGrid.queryRadius(c.position.x, c.position.y, c.radius + 35, (other) => {
+          return other !== c && other.isAlive && (other.genome?.adhesion ?? 0) >= 0.5;
+        });
+      }
+      if (candidates.length === 0 && this.creatures.length < 500) {
+        candidates = this.creatures.filter(other => {
+          if (other === c || !other.isAlive || (other.genome?.adhesion ?? 0) < 0.5) return false;
+          const rSum = c.radius + other.radius + 6;
+          return c.position.distSq(other.position) <= rSum * rSum;
+        });
+      }
+
+      for (const other of candidates) {
+        if (c.colony && c.colony === other.colony) continue;
+        if (c.colony && other.colony) continue;
+        if (other.colony && other.colony.cells.length >= 6) continue;
+
+        const isConspecific = (c.genome?.speciesId && other.genome?.speciesId)
+          ? (c.genome.speciesId === other.genome.speciesId)
+          : (c.genome?.geneticDistance && other.genome && c.genome.geneticDistance(other.genome) <= 0.28);
+        if (!isConspecific) continue;
+
+        const contactDist = c.radius + other.radius + 6;
+        if (c.position.distSq(other.position) <= contactDist * contactDist) {
+          if (!c.colony && !other.colony) {
+            const newColony = new Colony([c, other]);
+            this.colonies.push(newColony);
+            break;
+          } else if (c.colony && !other.colony) {
+            c.colony.addCell(other);
+            break;
+          } else if (!c.colony && other.colony) {
+            other.colony.addCell(c);
+            break;
+          }
+        }
+      }
+    }
+
+    // Update all active colonies & prune dissolved ones
+    for (let i = this.colonies.length - 1; i >= 0; i--) {
+      const col = this.colonies[i];
+      const offshoot = col.update(dt, env);
+      if (offshoot && env && env.addFloatingText) {
+        env.addFloatingText(offshoot.position.x, offshoot.position.y - 14, 'OFFSHOOT!', '#38bdf8');
+      }
+    }
+    this.colonies = this.colonies.filter(c => c.cells.length > 1);
 
     // 6. Natural Lotka-Volterra density stabilization: prevent total ecosystem collapse
     if (this.creatures.length < 12) {
@@ -4536,6 +6101,13 @@ class World {
         ctx.fillText(ft.text, ft.x, ft.y);
       }
       ctx.restore();
+    }
+
+    // 4. Multicellular Colony Bridges and Badges
+    if (this.colonies && this.colonies.length > 0) {
+      for (const col of this.colonies) {
+        col.draw(ctx);
+      }
     }
   }
 }
@@ -5465,6 +7037,711 @@ class SoundSynthesizer {
 const sound = new SoundSynthesizer();
 
 
+/* --- src/neuralVisualizer.js --- */
+/**
+ * Artificial Life Simulator - Live Neural Network Visualizer
+ * Renders real-time 10->8->4 feedforward perceptron topology, synaptic weights,
+ * glowing node activations, and sensory/motor telemetry inside the Creature Inspector.
+ */
+
+
+
+
+const INPUT_LABELS = [
+  'Food Dist',
+  'Food Ang',
+  'Danger',
+  'Threat Dist',
+  'Threat Ang',
+  'Mate Dist',
+  'Mate Ang',
+  'Energy',
+  'Drag',
+  'Solar'
+];
+
+const OUTPUT_LABELS = [
+  'Steer',
+  'Thrust',
+  'Court',
+  'Attack'
+];
+
+class NeuralVisualizer {
+  /**
+   * @param {HTMLCanvasElement|Object|null} canvas
+   */
+  constructor(canvas) {
+    this.canvas = canvas || null;
+    this.ctx = (this.canvas && typeof this.canvas.getContext === 'function')
+      ? this.canvas.getContext('2d')
+      : null;
+    this.INPUT_LABELS = INPUT_LABELS;
+    this.OUTPUT_LABELS = OUTPUT_LABELS;
+  }
+
+  /**
+   * Renders the live neural topology, synaptic weights, and node activations.
+   * @param {NeuralBrain|null} brain
+   * @param {'neural'|'heuristic'|string} [brainType='neural']
+   */
+  render(brain, brainType = 'neural') {
+    if (!this.canvas || !this.ctx) return;
+
+    const ctx = this.ctx;
+    const width = this.canvas.width || 268;
+    const height = this.canvas.height || 165;
+
+    ctx.clearRect(0, 0, width, height);
+    ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
+    ctx.fillRect(0, 0, width, height);
+
+    if (brainType !== 'neural' || !brain) {
+      ctx.save();
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.font = 'bold 12px sans-serif';
+      ctx.fillStyle = '#38bdf8';
+      ctx.fillText('Heuristic Rule Brain', width * 0.5, height * 0.45);
+      ctx.font = '10px sans-serif';
+      ctx.fillStyle = '#94a3b8';
+      ctx.fillText('Click Brain badge to switch to Neural', width * 0.5, height * 0.60);
+      ctx.restore();
+      return;
+    }
+
+    const numIn = BRAIN_CONFIG.INPUT_SIZE;
+    const numHid = BRAIN_CONFIG.HIDDEN_SIZE;
+    const numOut = BRAIN_CONFIG.OUTPUT_SIZE;
+
+    const col1X = 52;
+    const col2X = width * 0.5;
+    const col3X = width - 48;
+
+    const padYIn = 12;
+    const padYHid = 18;
+    const padYOut = 30;
+
+    const inCoords = [];
+    for (let i = 0; i < numIn; i++) {
+      const y = numIn > 1
+        ? padYIn + (i / (numIn - 1)) * (height - padYIn * 2)
+        : height * 0.5;
+      inCoords.push({ x: col1X, y });
+    }
+
+    const hidCoords = [];
+    for (let h = 0; h < numHid; h++) {
+      const y = numHid > 1
+        ? padYHid + (h / (numHid - 1)) * (height - padYHid * 2)
+        : height * 0.5;
+      hidCoords.push({ x: col2X, y });
+    }
+
+    const outCoords = [];
+    for (let o = 0; o < numOut; o++) {
+      const y = numOut > 1
+        ? padYOut + (o / (numOut - 1)) * (height - padYOut * 2)
+        : height * 0.5;
+      outCoords.push({ x: col3X, y });
+    }
+
+    const weights = brain.weights || new Float32Array(BRAIN_CONFIG.TOTAL_WEIGHTS);
+    const inAct = (brain.activations && brain.activations.input) || new Float32Array(numIn);
+    const hidAct = (brain.activations && brain.activations.hidden) || new Float32Array(numHid);
+    const outAct = (brain.activations && brain.activations.output) || new Float32Array(numOut);
+
+    // 1. Render Layer 1 Synapses (Input -> Hidden, W1: 0..79)
+    for (let h = 0; h < numHid; h++) {
+      const rowOffset = h * numIn;
+      const dst = hidCoords[h];
+      for (let i = 0; i < numIn; i++) {
+        const w = weights[rowOffset + i] || 0;
+        const alpha = clamp(Math.abs(w) / 2.5, 0.08, 0.9);
+        const src = inCoords[i];
+        ctx.beginPath();
+        ctx.moveTo(src.x, src.y);
+        ctx.lineTo(dst.x, dst.y);
+        ctx.strokeStyle = w >= 0
+          ? `rgba(74, 222, 128, ${alpha.toFixed(3)})`
+          : `rgba(248, 113, 113, ${alpha.toFixed(3)})`;
+        ctx.lineWidth = alpha * 1.6;
+        ctx.stroke();
+      }
+    }
+
+    // 2. Render Layer 2 Synapses (Hidden -> Output, W2: 88..119)
+    const w2Offset = BRAIN_CONFIG.W2_OFFSET;
+    for (let o = 0; o < numOut; o++) {
+      const rowOffset = w2Offset + o * numHid;
+      const dst = outCoords[o];
+      for (let h = 0; h < numHid; h++) {
+        const w = weights[rowOffset + h] || 0;
+        const alpha = clamp(Math.abs(w) / 2.5, 0.08, 0.9);
+        const src = hidCoords[h];
+        ctx.beginPath();
+        ctx.moveTo(src.x, src.y);
+        ctx.lineTo(dst.x, dst.y);
+        ctx.strokeStyle = w >= 0
+          ? `rgba(74, 222, 128, ${alpha.toFixed(3)})`
+          : `rgba(248, 113, 113, ${alpha.toFixed(3)})`;
+        ctx.lineWidth = alpha * 1.8;
+        ctx.stroke();
+      }
+    }
+
+    // Helper to draw an activation node with glow
+    const drawNode = (x, y, val, isOutput0 = false) => {
+      const normVal = isOutput0 ? clamp(val / Math.PI, -1.0, 1.0) : clamp(val, -1.0, 1.0);
+      const intensity = clamp(Math.abs(normVal), 0.15, 1.0);
+
+      // Outer glow for strong activations
+      if (Math.abs(normVal) > 0.25) {
+        ctx.beginPath();
+        ctx.arc(x, y, 7.0, 0, Math.PI * 2);
+        ctx.fillStyle = normVal >= 0
+          ? `rgba(56, 189, 248, ${(intensity * 0.35).toFixed(3)})`
+          : `rgba(245, 158, 11, ${(intensity * 0.35).toFixed(3)})`;
+        ctx.fill();
+      }
+
+      ctx.beginPath();
+      ctx.arc(x, y, 4.5, 0, Math.PI * 2);
+      if (Math.abs(normVal) < 0.05) {
+        ctx.fillStyle = '#1e293b';
+      } else if (normVal > 0) {
+        ctx.fillStyle = normVal > 0.5 ? '#4ade80' : '#38bdf8';
+      } else {
+        ctx.fillStyle = normVal < -0.5 ? '#ef4444' : '#f59e0b';
+      }
+      ctx.fill();
+      ctx.strokeStyle = '#94a3b8';
+      ctx.lineWidth = 1.0;
+      ctx.stroke();
+    };
+
+    // 3. Render Input Nodes & Labels
+    ctx.font = '9px sans-serif';
+    ctx.textBaseline = 'middle';
+    for (let i = 0; i < numIn; i++) {
+      const pt = inCoords[i];
+      const act = inAct[i] || 0;
+      drawNode(pt.x, pt.y, act, false);
+
+      ctx.textAlign = 'right';
+      ctx.fillStyle = '#cbd5e1';
+      ctx.fillText(this.INPUT_LABELS[i] || `In ${i}`, pt.x - 7, pt.y);
+    }
+
+    // 4. Render Hidden Nodes
+    for (let h = 0; h < numHid; h++) {
+      const pt = hidCoords[h];
+      const act = hidAct[h] || 0;
+      drawNode(pt.x, pt.y, act, false);
+    }
+
+    // 5. Render Output Nodes & Labels with Numeric Readout
+    for (let o = 0; o < numOut; o++) {
+      const pt = outCoords[o];
+      const act = outAct[o] || 0;
+      drawNode(pt.x, pt.y, act, o === 0);
+
+      ctx.textAlign = 'left';
+      ctx.fillStyle = '#e2e8f0';
+      const label = this.OUTPUT_LABELS[o] || `Out ${o}`;
+      const valStr = o === 0 ? `${(act * 180 / Math.PI).toFixed(0)}°` : act.toFixed(2);
+      ctx.fillText(`${label} ${valStr}`, pt.x + 7, pt.y);
+    }
+  }
+}
+
+
+/* --- src/arena.js --- */
+/**
+ * Artificial Life Simulator - Species Arena Battle Royale Tournament Mode
+ * Pits 4 distinct genetic clades against each other inside a shrinking
+ * high-radiation storm ring until a single champion clade survives.
+ */
+
+
+
+
+
+
+class ArenaTournament {
+  /**
+   * @param {import('./world.js').World} world
+   * @param {Object} [options={}]
+   */
+  constructor(world, options = {}) {
+    this.world = world;
+    this.centerX = options.centerX ?? (world ? world.width / 2 : 1400);
+    this.centerY = options.centerY ?? (world ? world.height / 2 : 900);
+    this.initialRadius = options.initialRadius ?? 1200;
+    this.minRadius = options.minRadius ?? 80;
+    this.duration = options.duration ?? 90; // seconds
+    this.radiationDamagePerSec = options.radiationDamagePerSec ?? 25;
+    this.organismsPerClade = options.organismsPerClade ?? 10;
+
+    this.stormRadius = this.initialRadius;
+    this.elapsedTime = 0;
+    this.isActive = false;
+    this.isComplete = false;
+    this.competingClades = [];
+    this.winner = null;
+    this.worldSnapshot = null;
+  }
+
+  /**
+   * Saves the current sandbox world state so exiting Arena restores the exact prior state.
+   */
+  snapshotWorld() {
+    if (!this.world) return;
+
+    const speciesClone = new Map();
+    if (this.world.speciesRegistry) {
+      for (const [id, record] of this.world.speciesRegistry.entries()) {
+        speciesClone.set(id, {
+          ...record,
+          representativeGenome: record.representativeGenome ? record.representativeGenome.clone() : null
+        });
+      }
+    }
+
+    const foodClone = this.world.foodManager
+      ? this.world.foodManager.foodList.map(f => ({
+          x: f.position.x,
+          y: f.position.y,
+          type: f.type,
+          energy: f.energy,
+          maxEnergy: f.maxEnergy,
+          age: f.age,
+          rotDuration: f.rotDuration,
+          rotTimer: f.rotTimer
+        }))
+      : [];
+
+    this.worldSnapshot = {
+      creatures: [...this.world.creatures],
+      colonies: [...(this.world.colonies || [])],
+      food: foodClone,
+      time: this.world.time,
+      dayCount: this.world.dayCount,
+      timeOfDay: this.world.timeOfDay,
+      temperature: this.world.temperature,
+      targetTemperature: this.world.targetTemperature,
+      climateState: this.world.climateState,
+      climateCycleTimer: this.world.climateCycleTimer,
+      foodGrowthMultiplier: this.world.foodGrowthMultiplier,
+      mutationMultiplier: this.world.mutationMultiplier,
+      kineticCostMultiplier: this.world.kineticCostMultiplier,
+      temperatureOverride: this.world.temperatureOverride,
+      showDeathMessages: this.world.showDeathMessages,
+      speciesRegistry: speciesClone,
+      fossilRecord: [...(this.world.fossilRecord || [])]
+    };
+  }
+
+  /**
+   * Restores the saved sandbox snapshot back to `this.world`.
+   */
+  restoreWorld() {
+    if (!this.world) return;
+
+    if (this.worldSnapshot) {
+      const snap = this.worldSnapshot;
+      this.world.creatures = [...snap.creatures];
+      this.world.colonies = [...snap.colonies];
+      this.world.time = snap.time;
+      this.world.dayCount = snap.dayCount;
+      this.world.timeOfDay = snap.timeOfDay;
+      this.world.temperature = snap.temperature;
+      this.world.targetTemperature = snap.targetTemperature;
+      this.world.climateState = snap.climateState;
+      this.world.climateCycleTimer = snap.climateCycleTimer;
+      this.world.foodGrowthMultiplier = snap.foodGrowthMultiplier;
+      this.world.mutationMultiplier = snap.mutationMultiplier;
+      this.world.kineticCostMultiplier = snap.kineticCostMultiplier;
+      this.world.temperatureOverride = snap.temperatureOverride;
+      this.world.showDeathMessages = snap.showDeathMessages;
+      this.world.speciesRegistry = snap.speciesRegistry;
+      this.world.fossilRecord = [...snap.fossilRecord];
+
+      if (this.world.creatureGrid) {
+        this.world.creatureGrid.clear();
+        for (const c of this.world.creatures) {
+          if (c.isAlive) {
+            this.world.creatureGrid.insert(c);
+          }
+        }
+      }
+
+      if (this.world.foodManager) {
+        this.world.foodManager.clear();
+        for (const item of snap.food) {
+          const pellet = new FoodPellet(item.x, item.y, item.type, item.energy);
+          pellet.maxEnergy = item.maxEnergy;
+          pellet.age = item.age;
+          pellet.rotDuration = item.rotDuration;
+          pellet.rotTimer = item.rotTimer;
+          this.world.foodManager.foodList.push(pellet);
+          this.world.foodManager.spatialGrid.insert(pellet);
+        }
+      }
+
+      this.worldSnapshot = null;
+    }
+
+    this.isActive = false;
+    this.isComplete = false;
+    this.winner = null;
+  }
+
+  /**
+   * Builds default neural warrior clade templates to fill up to 4 competing clades.
+   * @returns {Array<{speciesId: string, name: string, genome: Genome}>}
+   */
+  _createDefaultWarriorClades() {
+    return [
+      {
+        speciesId: 'clade_crimson_fang',
+        name: 'Crimson Fang (Apex)',
+        genome: new Genome({
+          speciesId: 'clade_crimson_fang',
+          speed: 3.8,
+          sense: 165,
+          size: 13.5,
+          diet: 0.92,
+          bravery: 0.92,
+          armor: 0.45,
+          brainType: 'neural'
+        })
+      },
+      {
+        speciesId: 'clade_obsidian_titan',
+        name: 'Obsidian Juggernaut',
+        genome: new Genome({
+          speciesId: 'clade_obsidian_titan',
+          speed: 2.7,
+          sense: 135,
+          size: 17.5,
+          diet: 0.78,
+          bravery: 0.88,
+          armor: 0.85,
+          brainType: 'neural'
+        })
+      },
+      {
+        speciesId: 'clade_emerald_viper',
+        name: 'Emerald Viper (Skirmisher)',
+        genome: new Genome({
+          speciesId: 'clade_emerald_viper',
+          speed: 4.4,
+          sense: 185,
+          size: 9.0,
+          diet: 0.55,
+          bravery: 0.72,
+          armor: 0.25,
+          camouflage: 0.85,
+          brainType: 'neural'
+        })
+      },
+      {
+        speciesId: 'clade_cobalt_swarm',
+        name: 'Cobalt Phalanx (Grazers)',
+        genome: new Genome({
+          speciesId: 'clade_cobalt_swarm',
+          speed: 3.6,
+          sense: 160,
+          size: 10.5,
+          diet: 0.22,
+          bravery: 0.65,
+          armor: 0.65,
+          flocking: 0.9,
+          brainType: 'neural'
+        })
+      }
+    ];
+  }
+
+  /**
+   * Starts the Arena Battle Royale tournament.
+   * @param {Array<Object>} [cladeSpecs=[]] Optional custom clade specifications
+   */
+  start(cladeSpecs = []) {
+    if (!this.world) return;
+
+    if (!this.isActive) {
+      this.snapshotWorld();
+    }
+
+    this.centerX = this.world.width / 2;
+    this.centerY = this.world.height / 2;
+
+    const selectedSpecs = [];
+
+    // 1. Use passed cladeSpecs if provided
+    if (Array.isArray(cladeSpecs) && cladeSpecs.length > 0) {
+      for (let i = 0; i < cladeSpecs.length; i++) {
+        const spec = cladeSpecs[i];
+        const baseGenome = spec.genome instanceof Genome
+          ? spec.genome.clone()
+          : new Genome(spec.genome || spec);
+        const spId = spec.speciesId || baseGenome.speciesId || `arena_clade_${i + 1}`;
+        baseGenome.speciesId = spId;
+        selectedSpecs.push({
+          speciesId: spId,
+          name: spec.name || spId,
+          genome: baseGenome,
+          count: spec.count ?? this.organismsPerClade
+        });
+      }
+    } else {
+      // 2. Otherwise pick top living species from current world
+      const speciesCounts = new Map();
+      for (const c of this.world.creatures) {
+        if (!c.isAlive) continue;
+        const spId = c.genome.speciesId;
+        const entry = speciesCounts.get(spId) || { count: 0, genome: c.genome };
+        entry.count++;
+        speciesCounts.set(spId, entry);
+      }
+
+      const sortedSpecies = Array.from(speciesCounts.entries())
+        .sort((a, b) => b[1].count - a[1].count)
+        .slice(0, 4);
+
+      for (const [spId, info] of sortedSpecies) {
+        const g = info.genome.clone();
+        g.speciesId = spId;
+        selectedSpecs.push({
+          speciesId: spId,
+          name: `Species ${spId}`,
+          genome: g,
+          count: this.organismsPerClade
+        });
+      }
+
+      // Fill up to 4 with distinct neural warrior clades if fewer than 4 exist
+      const defaults = this._createDefaultWarriorClades();
+      let defIdx = 0;
+      while (selectedSpecs.length < 4 && defIdx < defaults.length) {
+        const candidate = defaults[defIdx++];
+        if (!selectedSpecs.some(s => s.speciesId === candidate.speciesId)) {
+          selectedSpecs.push({
+            ...candidate,
+            count: this.organismsPerClade
+          });
+        }
+      }
+    }
+
+    // Clear arena world
+    this.world.creatures = [];
+    this.world.colonies = [];
+    if (this.world.creatureGrid) this.world.creatureGrid.clear();
+    if (this.world.speciesRegistry) this.world.speciesRegistry.clear();
+    if (this.world.foodManager) {
+      this.world.foodManager.clear();
+      // Spawn central arena food pellets & golden berries
+      for (let i = 0; i < 140; i++) {
+        const angle = Math.random() * Math.PI * 2;
+        const dist = Math.sqrt(Math.random()) * (this.initialRadius * 0.72);
+        const fx = clamp(this.centerX + Math.cos(angle) * dist, 40, this.world.width - 40);
+        const fy = clamp(this.centerY + Math.sin(angle) * dist, 40, this.world.height - 40);
+        if (i % 7 === 0) {
+          this.world.foodManager.spawnBerry(fx, fy, 80);
+        } else {
+          this.world.foodManager.spawnPlant(fx, fy, 40);
+        }
+      }
+    }
+
+    this.competingClades = [];
+    const numClades = selectedSpecs.length;
+    const spawnRingRadius = this.initialRadius * 0.55;
+
+    for (let i = 0; i < numClades; i++) {
+      const spec = selectedSpecs[i];
+      const sectorAngle = (i / Math.max(1, numClades)) * Math.PI * 2;
+      const sectorCenterX = this.centerX + Math.cos(sectorAngle) * spawnRingRadius;
+      const sectorCenterY = this.centerY + Math.sin(sectorAngle) * spawnRingRadius;
+      const orgCount = spec.count ?? this.organismsPerClade;
+
+      for (let j = 0; j < orgCount; j++) {
+        const subAngle = (j / Math.max(1, orgCount)) * Math.PI * 2;
+        const jitterR = orgCount > 1 ? randomFloat(18, 65) : 0;
+        const cx = clamp(sectorCenterX + Math.cos(subAngle) * jitterR, 40, this.world.width - 40);
+        const cy = clamp(sectorCenterY + Math.sin(subAngle) * jitterR, 40, this.world.height - 40);
+
+        const g = spec.genome.clone();
+        g.speciesId = spec.speciesId;
+        const c = new Creature(cx, cy, g, 140);
+        // Orient inward toward arena center
+        c.heading = Math.atan2(this.centerY - cy, this.centerX - cx);
+        this.world.creatures.push(c);
+        if (this.world.creatureGrid) this.world.creatureGrid.insert(c);
+        if (typeof this.world.registerCreatureSpecies === 'function') {
+          this.world.registerCreatureSpecies(c, null);
+        }
+      }
+
+      this.competingClades.push({
+        speciesId: spec.speciesId,
+        name: spec.name || spec.speciesId,
+        color: spec.genome.color ? spec.genome.color.bodyCss : '#38bdf8',
+        initialCount: orgCount,
+        aliveCount: orgCount,
+        kills: 0,
+        totalEnergy: orgCount * 140
+      });
+    }
+
+    this.stormRadius = this.initialRadius;
+    this.elapsedTime = 0;
+    this.isActive = true;
+    this.isComplete = false;
+    this.winner = null;
+  }
+
+  /**
+   * Stops the Arena tournament and restores the sandbox world state.
+   */
+  stop() {
+    this.restoreWorld();
+  }
+
+  /**
+   * Updates the shrinking radiation storm ring, applies out-of-bounds damage,
+   * refreshes the clade survival leaderboard, and checks victory conditions.
+   * @param {number} dt Delta time in seconds
+   * @returns {{isComplete: boolean, winner: Object|null, stormRadius: number, leaderboard: Array<Object>}}
+   */
+  update(dt) {
+    if (!this.isActive || !this.world) {
+      return {
+        isComplete: this.isComplete,
+        winner: this.winner,
+        stormRadius: this.stormRadius,
+        leaderboard: this.competingClades
+      };
+    }
+
+    if (!this.isComplete) {
+      this.elapsedTime += dt;
+      const progress = clamp(this.elapsedTime / this.duration, 0, 1);
+      this.stormRadius = this.initialRadius - (this.initialRadius - this.minRadius) * progress;
+
+      // Apply out-of-bounds radiation damage
+      for (const c of this.world.creatures) {
+        if (!c.isAlive) continue;
+        const dx = c.position.x - this.centerX;
+        const dy = c.position.y - this.centerY;
+        const d = Math.sqrt(dx * dx + dy * dy);
+
+        if (d > this.stormRadius) {
+          c.energy -= this.radiationDamagePerSec * dt;
+          if (c.energy <= 0) {
+            if (typeof c.die === 'function') {
+              c.die('disaster');
+            } else {
+              c.isAlive = false;
+              c.causeOfDeath = 'disaster';
+            }
+          }
+        }
+      }
+
+      // Refresh competing clade statistics
+      const cladeMap = new Map();
+      for (const clade of this.competingClades) {
+        clade.aliveCount = 0;
+        clade.kills = 0;
+        clade.totalEnergy = 0;
+        cladeMap.set(clade.speciesId, clade);
+      }
+
+      for (const c of this.world.creatures) {
+        let clade = cladeMap.get(c.genome.speciesId);
+        if (!clade && this.competingClades.length > 0) {
+          // Offspring that speciated during arena battle belong to their closest competing clade
+          let bestClade = this.competingClades[0];
+          clade = bestClade;
+        }
+        if (clade) {
+          clade.kills += c.kills || 0;
+          if (c.isAlive) {
+            clade.aliveCount++;
+            clade.totalEnergy += c.energy;
+          }
+        }
+      }
+
+      // Sort leaderboard by aliveCount desc, then totalEnergy desc, then kills desc
+      this.competingClades.sort((a, b) => {
+        if (b.aliveCount !== a.aliveCount) return b.aliveCount - a.aliveCount;
+        if (b.totalEnergy !== a.totalEnergy) return b.totalEnergy - a.totalEnergy;
+        return b.kills - a.kills;
+      });
+
+      // Check victory condition
+      const survivingClades = this.competingClades.filter(cl => cl.aliveCount > 0);
+      if (survivingClades.length <= 1 && this.competingClades.length > 1) {
+        this.isComplete = true;
+        this.winner = survivingClades[0] || this.competingClades[0] || null;
+      }
+    }
+
+    return {
+      isComplete: this.isComplete,
+      winner: this.winner,
+      stormRadius: this.stormRadius,
+      leaderboard: this.competingClades
+    };
+  }
+
+  /**
+   * Renders the glowing radiation storm ring and hazard zone onto the world canvas.
+   * @param {CanvasRenderingContext2D} ctx
+   */
+  draw(ctx) {
+    if (!this.isActive || !ctx) return;
+
+    ctx.save();
+
+    // Outer radiation hazard ring stroke (thick semi-transparent hazard aura)
+    const hazardBandWidth = 360;
+    ctx.beginPath();
+    ctx.arc(this.centerX, this.centerY, this.stormRadius + hazardBandWidth / 2, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(244, 63, 94, 0.14)';
+    ctx.lineWidth = hazardBandWidth;
+    ctx.stroke();
+
+    // Secondary violet radiation ring
+    ctx.beginPath();
+    ctx.arc(this.centerX, this.centerY, this.stormRadius + 14, 0, Math.PI * 2);
+    ctx.strokeStyle = '#c084fc';
+    ctx.lineWidth = 3;
+    if (typeof ctx.setLineDash === 'function') {
+      ctx.setLineDash([14, 10]);
+    }
+    ctx.stroke();
+
+    // Primary pulsing crimson storm wall
+    ctx.beginPath();
+    ctx.arc(this.centerX, this.centerY, this.stormRadius, 0, Math.PI * 2);
+    ctx.strokeStyle = '#f43f5e';
+    ctx.lineWidth = 4.5;
+    if (typeof ctx.setLineDash === 'function') {
+      ctx.setLineDash([]);
+    }
+    ctx.stroke();
+
+    ctx.restore();
+  }
+}
+
+
 
   /* ==================== INTERACTIVE TUTORIAL CONTROLLER ==================== */
   const TUTORIAL_STEPS = [
@@ -5724,12 +8001,18 @@ const sound = new SoundSynthesizer();
     }
   }
 
+
+
+
 // Canvases
 const canvas = document.getElementById('sim-canvas');
 const ctx = canvas.getContext('2d');
 
 const chartCanvas = document.getElementById('chart-canvas');
 const chartManager = new ChartManager(chartCanvas);
+
+const brainCanvas = document.getElementById('insp-brain-canvas');
+const neuralVisualizer = new NeuralVisualizer(brainCanvas);
 
 const minimapCanvas = document.getElementById('minimap-canvas');
 const miniCtx = minimapCanvas.getContext('2d');
@@ -5755,6 +8038,8 @@ let world = new World({
   maxFood: 420,
   showDeathMessages: true
 });
+
+const arena = new ArenaTournament(world);
 
 let camera = {
   x: WORLD_WIDTH / 2 - width / 2,
@@ -6059,6 +8344,16 @@ document.getElementById('btn-kill-creature').onclick = () => {
   }
 };
 
+const inspBrainTypeEl = document.getElementById('insp-brain-type');
+if (inspBrainTypeEl) {
+  inspBrainTypeEl.onclick = () => {
+    if (!selectedCreature || !selectedCreature.isAlive) return;
+    selectedCreature.brainType = selectedCreature.brainType === 'neural' ? 'heuristic' : 'neural';
+    updateInspectorUI();
+    showToast(`Creature #${selectedCreature.id} switched to ${selectedCreature.brainType.toUpperCase()} brain`, 'speciation');
+  };
+}
+
 // Live Gene Modifiers
 const geneSliders = {
   speed: document.getElementById('insp-slider-speed'),
@@ -6104,6 +8399,22 @@ function updateInspectorUI() {
   document.getElementById('insp-age').textContent = `${Math.round(c.age)}s / ${Math.round(c.lifespan)}s`;
   document.getElementById('insp-offspring').textContent = c.offspringCount;
   document.getElementById('insp-diet-stat').textContent = `${c.kills} / ${c.plantsEaten}`;
+
+  const brainTypeBadge = document.getElementById('insp-brain-type');
+  if (brainTypeBadge) {
+    if (c.brainType === 'neural') {
+      brainTypeBadge.textContent = 'NEURAL (124 syn)';
+      brainTypeBadge.style.color = '#c084fc';
+    } else {
+      brainTypeBadge.textContent = 'HEURISTIC (Rule)';
+      brainTypeBadge.style.color = '#38bdf8';
+    }
+  }
+  const brainSummaryEl = document.getElementById('insp-brain-Summary');
+  if (brainSummaryEl) {
+    brainSummaryEl.textContent = c.brainType === 'neural' ? 'Active' : 'Rule Mode';
+  }
+  neuralVisualizer.render(c.brain, c.brainType);
 
   if (btnPossess) {
     btnPossess.textContent = c.isPossessed ? 'Possess: ON' : 'Possess: OFF';
@@ -6519,8 +8830,89 @@ requestAnimationFrame(drawDnaPreview);
 
 // Expose on window for tests & developer console
 window.alsWorld = world;
+window.alsArena = arena;
 window.alsCamera = camera;
 window.alsSelectCreature = selectCreature;
+
+// Arena Battle Royale UI Controller
+const arenaHudEl = document.getElementById('arena-hud');
+const arenaTimerStatEl = document.getElementById('arena-timer-stat');
+const arenaLeaderboardEl = document.getElementById('arena-leaderboard');
+const arenaWinnerBannerEl = document.getElementById('arena-winner-banner');
+const btnArenaMode = document.getElementById('btn-arena-mode');
+const btnArenaRematch = document.getElementById('btn-arena-rematch');
+const btnArenaExit = document.getElementById('btn-arena-exit');
+
+function updateArenaHud() {
+  if (!arenaHudEl || !arena.isActive) return;
+
+  if (arenaTimerStatEl) {
+    const mins = Math.floor(arena.elapsedTime / 60).toString().padStart(2, '0');
+    const secs = Math.floor(arena.elapsedTime % 60).toString().padStart(2, '0');
+    arenaTimerStatEl.textContent = `Storm: ${Math.round(arena.stormRadius)}px | ${mins}:${secs}`;
+  }
+
+  if (arenaLeaderboardEl) {
+    arenaLeaderboardEl.innerHTML = arena.competingClades.map((clade, idx) => {
+      const rankIcon = idx === 0 ? '👑' : `#${idx + 1}`;
+      const opacity = clade.aliveCount > 0 ? '1' : '0.45';
+      return `<div class="arena-clade-row" style="border-left-color: ${clade.color}; opacity: ${opacity};">
+        <span><strong>${rankIcon} ${clade.name}</strong></span>
+        <span>Alive: <strong>${clade.aliveCount}/${clade.initialCount}</strong> | Kills: <strong>${clade.kills}</strong> | NRG: <strong>${Math.round(clade.totalEnergy)}</strong></span>
+      </div>`;
+    }).join('');
+  }
+
+  if (arenaWinnerBannerEl) {
+    if (arena.isComplete && arena.winner) {
+      arenaWinnerBannerEl.textContent = `🏆 CHAMPION CLADE: ${arena.winner.name} (${arena.winner.aliveCount} survivors, ${arena.winner.kills} kills)!`;
+      arenaWinnerBannerEl.classList.add('visible');
+    } else {
+      arenaWinnerBannerEl.classList.remove('visible');
+      arenaWinnerBannerEl.textContent = '';
+    }
+  }
+}
+
+if (btnArenaMode) {
+  btnArenaMode.onclick = () => {
+    if (!arena.isActive) {
+      hideInspector();
+      arena.start();
+      if (arenaHudEl) arenaHudEl.classList.add('open');
+      btnArenaMode.classList.add('active');
+      camera.x = arena.centerX - width / 2;
+      camera.y = arena.centerY - height / 2;
+      camera.zoom = 0.65;
+      updateArenaHud();
+      showToast('⚔️ Species Arena Battle Royale Started! 4 Clades Enter!', 'disaster');
+    } else {
+      arena.stop();
+      if (arenaHudEl) arenaHudEl.classList.remove('open');
+      btnArenaMode.classList.remove('active');
+      showToast('Exited Arena — Sandbox Ecosystem Restored', 'speciation');
+    }
+  };
+}
+
+if (btnArenaRematch) {
+  btnArenaRematch.onclick = () => {
+    hideInspector();
+    arena.start();
+    updateArenaHud();
+    showToast('🔄 Arena Rematch Started!', 'disaster');
+  };
+}
+
+if (btnArenaExit) {
+  btnArenaExit.onclick = () => {
+    hideInspector();
+    arena.stop();
+    if (arenaHudEl) arenaHudEl.classList.remove('open');
+    if (btnArenaMode) btnArenaMode.classList.remove('active');
+    showToast('Exited Arena — Sandbox Ecosystem Restored', 'speciation');
+  };
+}
 
 // Minimap Drawing Helper
 function drawMinimap() {
@@ -6612,6 +9004,10 @@ function step() {
 
   if (!isPaused) {
     world.update(dt);
+    if (arena.isActive) {
+      arena.update(dt);
+      updateArenaHud();
+    }
   }
 
   if (cameraFollowSelected && selectedCreature && selectedCreature.isAlive) {
@@ -6773,6 +9169,10 @@ function step() {
   }
 
   world.drawWorldEffects(ctx);
+
+  if (arena.isActive) {
+    arena.draw(ctx);
+  }
 
   // Ambient Day / Night / Sunset atmospheric overlay
   if (world.isNight || world.solarIntensity < 0.85) {
