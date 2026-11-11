@@ -1856,6 +1856,50 @@ import('../src/world.js').then(async ({ World }) => {
   assert(arenaWorld.climateState === preArenaClimate, 'Restored exact sandbox climateState');
   assert(arenaWorld.speciesRegistry.size === preArenaSpeciesSize, 'Restored exact sandbox speciesRegistry');
 
+  console.log('--- Testing Task 9: Cloudflare Pages Build Pipeline & Production Packaging ---');
+  const fs = await import('fs');
+  const path = await import('path');
+  const { fileURLToPath } = await import('url');
+  const testDir = path.dirname(fileURLToPath(import.meta.url));
+  const rootDir = path.resolve(testDir, '..');
+
+  // 1. Verify wrangler.toml
+  const wranglerPath = path.join(rootDir, 'wrangler.toml');
+  assert(fs.existsSync(wranglerPath), 'wrangler.toml exists at repository root');
+  const wranglerContent = fs.readFileSync(wranglerPath, 'utf8');
+  assert(wranglerContent.includes('name = "artificial-life-simulator"'), 'wrangler.toml configures name = "artificial-life-simulator"');
+  assert(wranglerContent.includes('compatibility_date = "2025-01-01"'), 'wrangler.toml configures compatibility_date = "2025-01-01"');
+  assert(wranglerContent.includes('pages_build_output_dir = "dist"'), 'wrangler.toml configures pages_build_output_dir = "dist"');
+
+  // 2. Verify package.json scripts
+  const pkgPath = path.join(rootDir, 'package.json');
+  const pkgJson = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+  assert(pkgJson.scripts && pkgJson.scripts.deploy === 'npx wrangler pages deploy dist --project-name artificial-life-simulator', 'package.json includes Cloudflare Pages deploy script');
+  assert(pkgJson.scripts && pkgJson.scripts.build === 'node scripts/build_standalone.js', 'package.json includes build script');
+
+  // 3. Verify dist/index.html and root index.html
+  const rootIndexPath = path.join(rootDir, 'index.html');
+  const distIndexPath = path.join(rootDir, 'dist', 'index.html');
+  assert(fs.existsSync(rootIndexPath), 'Root index.html exists');
+  assert(fs.existsSync(distIndexPath), 'dist/index.html exists');
+  const rootIndexContent = fs.readFileSync(rootIndexPath, 'utf8');
+  const distIndexContent = fs.readFileSync(distIndexPath, 'utf8');
+  assert(distIndexContent.length > 1000, 'dist/index.html is non-empty');
+  assert(distIndexContent === rootIndexContent, 'dist/index.html matches root index.html');
+  assert(distIndexContent.includes('class NeuralBrain'), 'dist/index.html bundles NeuralBrain');
+  assert(distIndexContent.includes('class Colony'), 'dist/index.html bundles Colony');
+  assert(distIndexContent.includes('class NeuralVisualizer'), 'dist/index.html bundles NeuralVisualizer');
+  assert(distIndexContent.includes('class ArenaTournament'), 'dist/index.html bundles ArenaTournament');
+
+  // 4. Verify dist/_headers
+  const distHeadersPath = path.join(rootDir, 'dist', '_headers');
+  assert(fs.existsSync(distHeadersPath), 'dist/_headers exists');
+  const distHeadersContent = fs.readFileSync(distHeadersPath, 'utf8');
+  assert(distHeadersContent.includes('X-Frame-Options: DENY'), 'dist/_headers configures X-Frame-Options: DENY');
+  assert(distHeadersContent.includes('X-Content-Type-Options: nosniff'), 'dist/_headers configures X-Content-Type-Options: nosniff');
+  assert(distHeadersContent.includes('Referrer-Policy: strict-origin-when-cross-origin'), 'dist/_headers configures Referrer-Policy');
+  assert(distHeadersContent.includes('Cache-Control: public, max-age=3600'), 'dist/_headers configures Cache-Control');
+
   console.log(`\nResults: ${passed} passed, ${failed} failed.`);
   if (failed > 0) {
     process.exit(1);

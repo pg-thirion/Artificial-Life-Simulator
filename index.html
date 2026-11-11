@@ -1691,225 +1691,6 @@ class NeuralBrain {
 }
 
 
-/* --- src/neuralVisualizer.js --- */
-/**
- * Artificial Life Simulator - Live Neural Network Visualizer
- * Renders real-time 10->8->4 feedforward perceptron topology, synaptic weights,
- * glowing node activations, and sensory/motor telemetry inside the Creature Inspector.
- */
-
-
-
-
-const INPUT_LABELS = [
-  'Food Dist',
-  'Food Ang',
-  'Danger',
-  'Threat Dist',
-  'Threat Ang',
-  'Mate Dist',
-  'Mate Ang',
-  'Energy',
-  'Drag',
-  'Solar'
-];
-
-const OUTPUT_LABELS = [
-  'Steer',
-  'Thrust',
-  'Court',
-  'Attack'
-];
-
-class NeuralVisualizer {
-  /**
-   * @param {HTMLCanvasElement|Object|null} canvas
-   */
-  constructor(canvas) {
-    this.canvas = canvas || null;
-    this.ctx = (this.canvas && typeof this.canvas.getContext === 'function')
-      ? this.canvas.getContext('2d')
-      : null;
-    this.INPUT_LABELS = INPUT_LABELS;
-    this.OUTPUT_LABELS = OUTPUT_LABELS;
-  }
-
-  /**
-   * Renders the live neural topology, synaptic weights, and node activations.
-   * @param {NeuralBrain|null} brain
-   * @param {'neural'|'heuristic'|string} [brainType='neural']
-   */
-  render(brain, brainType = 'neural') {
-    if (!this.canvas || !this.ctx) return;
-
-    const ctx = this.ctx;
-    const width = this.canvas.width || 268;
-    const height = this.canvas.height || 165;
-
-    ctx.clearRect(0, 0, width, height);
-    ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
-    ctx.fillRect(0, 0, width, height);
-
-    if (brainType !== 'neural' || !brain) {
-      ctx.save();
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.font = 'bold 12px sans-serif';
-      ctx.fillStyle = '#38bdf8';
-      ctx.fillText('Heuristic Rule Brain', width * 0.5, height * 0.45);
-      ctx.font = '10px sans-serif';
-      ctx.fillStyle = '#94a3b8';
-      ctx.fillText('Click Brain badge to switch to Neural', width * 0.5, height * 0.60);
-      ctx.restore();
-      return;
-    }
-
-    const numIn = BRAIN_CONFIG.INPUT_SIZE;
-    const numHid = BRAIN_CONFIG.HIDDEN_SIZE;
-    const numOut = BRAIN_CONFIG.OUTPUT_SIZE;
-
-    const col1X = 52;
-    const col2X = width * 0.5;
-    const col3X = width - 48;
-
-    const padYIn = 12;
-    const padYHid = 18;
-    const padYOut = 30;
-
-    const inCoords = [];
-    for (let i = 0; i < numIn; i++) {
-      const y = numIn > 1
-        ? padYIn + (i / (numIn - 1)) * (height - padYIn * 2)
-        : height * 0.5;
-      inCoords.push({ x: col1X, y });
-    }
-
-    const hidCoords = [];
-    for (let h = 0; h < numHid; h++) {
-      const y = numHid > 1
-        ? padYHid + (h / (numHid - 1)) * (height - padYHid * 2)
-        : height * 0.5;
-      hidCoords.push({ x: col2X, y });
-    }
-
-    const outCoords = [];
-    for (let o = 0; o < numOut; o++) {
-      const y = numOut > 1
-        ? padYOut + (o / (numOut - 1)) * (height - padYOut * 2)
-        : height * 0.5;
-      outCoords.push({ x: col3X, y });
-    }
-
-    const weights = brain.weights || new Float32Array(BRAIN_CONFIG.TOTAL_WEIGHTS);
-    const inAct = (brain.activations && brain.activations.input) || new Float32Array(numIn);
-    const hidAct = (brain.activations && brain.activations.hidden) || new Float32Array(numHid);
-    const outAct = (brain.activations && brain.activations.output) || new Float32Array(numOut);
-
-    // 1. Render Layer 1 Synapses (Input -> Hidden, W1: 0..79)
-    for (let h = 0; h < numHid; h++) {
-      const rowOffset = h * numIn;
-      const dst = hidCoords[h];
-      for (let i = 0; i < numIn; i++) {
-        const w = weights[rowOffset + i] || 0;
-        const alpha = clamp(Math.abs(w) / 2.5, 0.08, 0.9);
-        const src = inCoords[i];
-        ctx.beginPath();
-        ctx.moveTo(src.x, src.y);
-        ctx.lineTo(dst.x, dst.y);
-        ctx.strokeStyle = w >= 0
-          ? `rgba(74, 222, 128, ${alpha.toFixed(3)})`
-          : `rgba(248, 113, 113, ${alpha.toFixed(3)})`;
-        ctx.lineWidth = alpha * 1.6;
-        ctx.stroke();
-      }
-    }
-
-    // 2. Render Layer 2 Synapses (Hidden -> Output, W2: 88..119)
-    const w2Offset = BRAIN_CONFIG.W2_OFFSET;
-    for (let o = 0; o < numOut; o++) {
-      const rowOffset = w2Offset + o * numHid;
-      const dst = outCoords[o];
-      for (let h = 0; h < numHid; h++) {
-        const w = weights[rowOffset + h] || 0;
-        const alpha = clamp(Math.abs(w) / 2.5, 0.08, 0.9);
-        const src = hidCoords[h];
-        ctx.beginPath();
-        ctx.moveTo(src.x, src.y);
-        ctx.lineTo(dst.x, dst.y);
-        ctx.strokeStyle = w >= 0
-          ? `rgba(74, 222, 128, ${alpha.toFixed(3)})`
-          : `rgba(248, 113, 113, ${alpha.toFixed(3)})`;
-        ctx.lineWidth = alpha * 1.8;
-        ctx.stroke();
-      }
-    }
-
-    // Helper to draw an activation node with glow
-    const drawNode = (x, y, val, isOutput0 = false) => {
-      const normVal = isOutput0 ? clamp(val / Math.PI, -1.0, 1.0) : clamp(val, -1.0, 1.0);
-      const intensity = clamp(Math.abs(normVal), 0.15, 1.0);
-
-      // Outer glow for strong activations
-      if (Math.abs(normVal) > 0.25) {
-        ctx.beginPath();
-        ctx.arc(x, y, 7.0, 0, Math.PI * 2);
-        ctx.fillStyle = normVal >= 0
-          ? `rgba(56, 189, 248, ${(intensity * 0.35).toFixed(3)})`
-          : `rgba(245, 158, 11, ${(intensity * 0.35).toFixed(3)})`;
-        ctx.fill();
-      }
-
-      ctx.beginPath();
-      ctx.arc(x, y, 4.5, 0, Math.PI * 2);
-      if (Math.abs(normVal) < 0.05) {
-        ctx.fillStyle = '#1e293b';
-      } else if (normVal > 0) {
-        ctx.fillStyle = normVal > 0.5 ? '#4ade80' : '#38bdf8';
-      } else {
-        ctx.fillStyle = normVal < -0.5 ? '#ef4444' : '#f59e0b';
-      }
-      ctx.fill();
-      ctx.strokeStyle = '#94a3b8';
-      ctx.lineWidth = 1.0;
-      ctx.stroke();
-    };
-
-    // 3. Render Input Nodes & Labels
-    ctx.font = '9px sans-serif';
-    ctx.textBaseline = 'middle';
-    for (let i = 0; i < numIn; i++) {
-      const pt = inCoords[i];
-      const act = inAct[i] || 0;
-      drawNode(pt.x, pt.y, act, false);
-
-      ctx.textAlign = 'right';
-      ctx.fillStyle = '#cbd5e1';
-      ctx.fillText(this.INPUT_LABELS[i] || `In ${i}`, pt.x - 7, pt.y);
-    }
-
-    // 4. Render Hidden Nodes
-    for (let h = 0; h < numHid; h++) {
-      const pt = hidCoords[h];
-      const act = hidAct[h] || 0;
-      drawNode(pt.x, pt.y, act, false);
-    }
-
-    // 5. Render Output Nodes & Labels with Numeric Readout
-    for (let o = 0; o < numOut; o++) {
-      const pt = outCoords[o];
-      const act = outAct[o] || 0;
-      drawNode(pt.x, pt.y, act, o === 0);
-
-      ctx.textAlign = 'left';
-      ctx.fillStyle = '#e2e8f0';
-      const label = this.OUTPUT_LABELS[o] || `Out ${o}`;
-      const valStr = o === 0 ? `${(act * 180 / Math.PI).toFixed(0)}°` : act.toFixed(2);
-      ctx.fillText(`${label} ${valStr}`, pt.x + 7, pt.y);
-    }
-  }
-}
-
-
 /* --- src/spatialGrid.js --- */
 /**
  * Artificial Life Simulator - Spatial Hash Grid
@@ -6332,492 +6113,6 @@ class World {
 }
 
 
-/* --- src/arena.js --- */
-/**
- * Artificial Life Simulator - Species Arena Battle Royale Tournament Mode
- * Pits 4 distinct genetic clades against each other inside a shrinking
- * high-radiation storm ring until a single champion clade survives.
- */
-
-
-
-
-
-
-class ArenaTournament {
-  /**
-   * @param {import('./world.js').World} world
-   * @param {Object} [options={}]
-   */
-  constructor(world, options = {}) {
-    this.world = world;
-    this.centerX = options.centerX ?? (world ? world.width / 2 : 1400);
-    this.centerY = options.centerY ?? (world ? world.height / 2 : 900);
-    this.initialRadius = options.initialRadius ?? 1200;
-    this.minRadius = options.minRadius ?? 80;
-    this.duration = options.duration ?? 90; // seconds
-    this.radiationDamagePerSec = options.radiationDamagePerSec ?? 25;
-    this.organismsPerClade = options.organismsPerClade ?? 10;
-
-    this.stormRadius = this.initialRadius;
-    this.elapsedTime = 0;
-    this.isActive = false;
-    this.isComplete = false;
-    this.competingClades = [];
-    this.winner = null;
-    this.worldSnapshot = null;
-  }
-
-  /**
-   * Saves the current sandbox world state so exiting Arena restores the exact prior state.
-   */
-  snapshotWorld() {
-    if (!this.world) return;
-
-    const speciesClone = new Map();
-    if (this.world.speciesRegistry) {
-      for (const [id, record] of this.world.speciesRegistry.entries()) {
-        speciesClone.set(id, {
-          ...record,
-          representativeGenome: record.representativeGenome ? record.representativeGenome.clone() : null
-        });
-      }
-    }
-
-    const foodClone = this.world.foodManager
-      ? this.world.foodManager.foodList.map(f => ({
-          x: f.position.x,
-          y: f.position.y,
-          type: f.type,
-          energy: f.energy,
-          maxEnergy: f.maxEnergy,
-          age: f.age,
-          rotDuration: f.rotDuration,
-          rotTimer: f.rotTimer
-        }))
-      : [];
-
-    this.worldSnapshot = {
-      creatures: [...this.world.creatures],
-      colonies: [...(this.world.colonies || [])],
-      food: foodClone,
-      time: this.world.time,
-      dayCount: this.world.dayCount,
-      timeOfDay: this.world.timeOfDay,
-      temperature: this.world.temperature,
-      targetTemperature: this.world.targetTemperature,
-      climateState: this.world.climateState,
-      climateCycleTimer: this.world.climateCycleTimer,
-      foodGrowthMultiplier: this.world.foodGrowthMultiplier,
-      mutationMultiplier: this.world.mutationMultiplier,
-      kineticCostMultiplier: this.world.kineticCostMultiplier,
-      temperatureOverride: this.world.temperatureOverride,
-      showDeathMessages: this.world.showDeathMessages,
-      speciesRegistry: speciesClone,
-      fossilRecord: [...(this.world.fossilRecord || [])]
-    };
-  }
-
-  /**
-   * Restores the saved sandbox snapshot back to `this.world`.
-   */
-  restoreWorld() {
-    if (!this.world) return;
-
-    if (this.worldSnapshot) {
-      const snap = this.worldSnapshot;
-      this.world.creatures = [...snap.creatures];
-      this.world.colonies = [...snap.colonies];
-      this.world.time = snap.time;
-      this.world.dayCount = snap.dayCount;
-      this.world.timeOfDay = snap.timeOfDay;
-      this.world.temperature = snap.temperature;
-      this.world.targetTemperature = snap.targetTemperature;
-      this.world.climateState = snap.climateState;
-      this.world.climateCycleTimer = snap.climateCycleTimer;
-      this.world.foodGrowthMultiplier = snap.foodGrowthMultiplier;
-      this.world.mutationMultiplier = snap.mutationMultiplier;
-      this.world.kineticCostMultiplier = snap.kineticCostMultiplier;
-      this.world.temperatureOverride = snap.temperatureOverride;
-      this.world.showDeathMessages = snap.showDeathMessages;
-      this.world.speciesRegistry = snap.speciesRegistry;
-      this.world.fossilRecord = [...snap.fossilRecord];
-
-      if (this.world.creatureGrid) {
-        this.world.creatureGrid.clear();
-        for (const c of this.world.creatures) {
-          if (c.isAlive) {
-            this.world.creatureGrid.insert(c);
-          }
-        }
-      }
-
-      if (this.world.foodManager) {
-        this.world.foodManager.clear();
-        for (const item of snap.food) {
-          const pellet = new FoodPellet(item.x, item.y, item.type, item.energy);
-          pellet.maxEnergy = item.maxEnergy;
-          pellet.age = item.age;
-          pellet.rotDuration = item.rotDuration;
-          pellet.rotTimer = item.rotTimer;
-          this.world.foodManager.foodList.push(pellet);
-          this.world.foodManager.spatialGrid.insert(pellet);
-        }
-      }
-
-      this.worldSnapshot = null;
-    }
-
-    this.isActive = false;
-    this.isComplete = false;
-    this.winner = null;
-  }
-
-  /**
-   * Builds default neural warrior clade templates to fill up to 4 competing clades.
-   * @returns {Array<{speciesId: string, name: string, genome: Genome}>}
-   */
-  _createDefaultWarriorClades() {
-    return [
-      {
-        speciesId: 'clade_crimson_fang',
-        name: 'Crimson Fang (Apex)',
-        genome: new Genome({
-          speciesId: 'clade_crimson_fang',
-          speed: 3.8,
-          sense: 165,
-          size: 13.5,
-          diet: 0.92,
-          bravery: 0.92,
-          armor: 0.45,
-          brainType: 'neural'
-        })
-      },
-      {
-        speciesId: 'clade_obsidian_titan',
-        name: 'Obsidian Juggernaut',
-        genome: new Genome({
-          speciesId: 'clade_obsidian_titan',
-          speed: 2.7,
-          sense: 135,
-          size: 17.5,
-          diet: 0.78,
-          bravery: 0.88,
-          armor: 0.85,
-          brainType: 'neural'
-        })
-      },
-      {
-        speciesId: 'clade_emerald_viper',
-        name: 'Emerald Viper (Skirmisher)',
-        genome: new Genome({
-          speciesId: 'clade_emerald_viper',
-          speed: 4.4,
-          sense: 185,
-          size: 9.0,
-          diet: 0.55,
-          bravery: 0.72,
-          armor: 0.25,
-          camouflage: 0.85,
-          brainType: 'neural'
-        })
-      },
-      {
-        speciesId: 'clade_cobalt_swarm',
-        name: 'Cobalt Phalanx (Grazers)',
-        genome: new Genome({
-          speciesId: 'clade_cobalt_swarm',
-          speed: 3.6,
-          sense: 160,
-          size: 10.5,
-          diet: 0.22,
-          bravery: 0.65,
-          armor: 0.65,
-          flocking: 0.9,
-          brainType: 'neural'
-        })
-      }
-    ];
-  }
-
-  /**
-   * Starts the Arena Battle Royale tournament.
-   * @param {Array<Object>} [cladeSpecs=[]] Optional custom clade specifications
-   */
-  start(cladeSpecs = []) {
-    if (!this.world) return;
-
-    if (!this.isActive) {
-      this.snapshotWorld();
-    }
-
-    this.centerX = this.world.width / 2;
-    this.centerY = this.world.height / 2;
-
-    const selectedSpecs = [];
-
-    // 1. Use passed cladeSpecs if provided
-    if (Array.isArray(cladeSpecs) && cladeSpecs.length > 0) {
-      for (let i = 0; i < cladeSpecs.length; i++) {
-        const spec = cladeSpecs[i];
-        const baseGenome = spec.genome instanceof Genome
-          ? spec.genome.clone()
-          : new Genome(spec.genome || spec);
-        const spId = spec.speciesId || baseGenome.speciesId || `arena_clade_${i + 1}`;
-        baseGenome.speciesId = spId;
-        selectedSpecs.push({
-          speciesId: spId,
-          name: spec.name || spId,
-          genome: baseGenome,
-          count: spec.count ?? this.organismsPerClade
-        });
-      }
-    } else {
-      // 2. Otherwise pick top living species from current world
-      const speciesCounts = new Map();
-      for (const c of this.world.creatures) {
-        if (!c.isAlive) continue;
-        const spId = c.genome.speciesId;
-        const entry = speciesCounts.get(spId) || { count: 0, genome: c.genome };
-        entry.count++;
-        speciesCounts.set(spId, entry);
-      }
-
-      const sortedSpecies = Array.from(speciesCounts.entries())
-        .sort((a, b) => b[1].count - a[1].count)
-        .slice(0, 4);
-
-      for (const [spId, info] of sortedSpecies) {
-        const g = info.genome.clone();
-        g.speciesId = spId;
-        selectedSpecs.push({
-          speciesId: spId,
-          name: `Species ${spId}`,
-          genome: g,
-          count: this.organismsPerClade
-        });
-      }
-
-      // Fill up to 4 with distinct neural warrior clades if fewer than 4 exist
-      const defaults = this._createDefaultWarriorClades();
-      let defIdx = 0;
-      while (selectedSpecs.length < 4 && defIdx < defaults.length) {
-        const candidate = defaults[defIdx++];
-        if (!selectedSpecs.some(s => s.speciesId === candidate.speciesId)) {
-          selectedSpecs.push({
-            ...candidate,
-            count: this.organismsPerClade
-          });
-        }
-      }
-    }
-
-    // Clear arena world
-    this.world.creatures = [];
-    this.world.colonies = [];
-    if (this.world.creatureGrid) this.world.creatureGrid.clear();
-    if (this.world.speciesRegistry) this.world.speciesRegistry.clear();
-    if (this.world.foodManager) {
-      this.world.foodManager.clear();
-      // Spawn central arena food pellets & golden berries
-      for (let i = 0; i < 140; i++) {
-        const angle = Math.random() * Math.PI * 2;
-        const dist = Math.sqrt(Math.random()) * (this.initialRadius * 0.72);
-        const fx = clamp(this.centerX + Math.cos(angle) * dist, 40, this.world.width - 40);
-        const fy = clamp(this.centerY + Math.sin(angle) * dist, 40, this.world.height - 40);
-        if (i % 7 === 0) {
-          this.world.foodManager.spawnBerry(fx, fy, 80);
-        } else {
-          this.world.foodManager.spawnPlant(fx, fy, 40);
-        }
-      }
-    }
-
-    this.competingClades = [];
-    const numClades = selectedSpecs.length;
-    const spawnRingRadius = this.initialRadius * 0.55;
-
-    for (let i = 0; i < numClades; i++) {
-      const spec = selectedSpecs[i];
-      const sectorAngle = (i / Math.max(1, numClades)) * Math.PI * 2;
-      const sectorCenterX = this.centerX + Math.cos(sectorAngle) * spawnRingRadius;
-      const sectorCenterY = this.centerY + Math.sin(sectorAngle) * spawnRingRadius;
-      const orgCount = spec.count ?? this.organismsPerClade;
-
-      for (let j = 0; j < orgCount; j++) {
-        const subAngle = (j / Math.max(1, orgCount)) * Math.PI * 2;
-        const jitterR = orgCount > 1 ? randomFloat(18, 65) : 0;
-        const cx = clamp(sectorCenterX + Math.cos(subAngle) * jitterR, 40, this.world.width - 40);
-        const cy = clamp(sectorCenterY + Math.sin(subAngle) * jitterR, 40, this.world.height - 40);
-
-        const g = spec.genome.clone();
-        g.speciesId = spec.speciesId;
-        const c = new Creature(cx, cy, g, 140);
-        // Orient inward toward arena center
-        c.heading = Math.atan2(this.centerY - cy, this.centerX - cx);
-        this.world.creatures.push(c);
-        if (this.world.creatureGrid) this.world.creatureGrid.insert(c);
-        if (typeof this.world.registerCreatureSpecies === 'function') {
-          this.world.registerCreatureSpecies(c, null);
-        }
-      }
-
-      this.competingClades.push({
-        speciesId: spec.speciesId,
-        name: spec.name || spec.speciesId,
-        color: spec.genome.color ? spec.genome.color.bodyCss : '#38bdf8',
-        initialCount: orgCount,
-        aliveCount: orgCount,
-        kills: 0,
-        totalEnergy: orgCount * 140
-      });
-    }
-
-    this.stormRadius = this.initialRadius;
-    this.elapsedTime = 0;
-    this.isActive = true;
-    this.isComplete = false;
-    this.winner = null;
-  }
-
-  /**
-   * Stops the Arena tournament and restores the sandbox world state.
-   */
-  stop() {
-    this.restoreWorld();
-  }
-
-  /**
-   * Updates the shrinking radiation storm ring, applies out-of-bounds damage,
-   * refreshes the clade survival leaderboard, and checks victory conditions.
-   * @param {number} dt Delta time in seconds
-   * @returns {{isComplete: boolean, winner: Object|null, stormRadius: number, leaderboard: Array<Object>}}
-   */
-  update(dt) {
-    if (!this.isActive || !this.world) {
-      return {
-        isComplete: this.isComplete,
-        winner: this.winner,
-        stormRadius: this.stormRadius,
-        leaderboard: this.competingClades
-      };
-    }
-
-    if (!this.isComplete) {
-      this.elapsedTime += dt;
-      const progress = clamp(this.elapsedTime / this.duration, 0, 1);
-      this.stormRadius = this.initialRadius - (this.initialRadius - this.minRadius) * progress;
-
-      // Apply out-of-bounds radiation damage
-      for (const c of this.world.creatures) {
-        if (!c.isAlive) continue;
-        const dx = c.position.x - this.centerX;
-        const dy = c.position.y - this.centerY;
-        const d = Math.sqrt(dx * dx + dy * dy);
-
-        if (d > this.stormRadius) {
-          c.energy -= this.radiationDamagePerSec * dt;
-          if (c.energy <= 0) {
-            if (typeof c.die === 'function') {
-              c.die('disaster');
-            } else {
-              c.isAlive = false;
-              c.causeOfDeath = 'disaster';
-            }
-          }
-        }
-      }
-
-      // Refresh competing clade statistics
-      const cladeMap = new Map();
-      for (const clade of this.competingClades) {
-        clade.aliveCount = 0;
-        clade.kills = 0;
-        clade.totalEnergy = 0;
-        cladeMap.set(clade.speciesId, clade);
-      }
-
-      for (const c of this.world.creatures) {
-        let clade = cladeMap.get(c.genome.speciesId);
-        if (!clade && this.competingClades.length > 0) {
-          // Offspring that speciated during arena battle belong to their closest competing clade
-          let bestClade = this.competingClades[0];
-          clade = bestClade;
-        }
-        if (clade) {
-          clade.kills += c.kills || 0;
-          if (c.isAlive) {
-            clade.aliveCount++;
-            clade.totalEnergy += c.energy;
-          }
-        }
-      }
-
-      // Sort leaderboard by aliveCount desc, then totalEnergy desc, then kills desc
-      this.competingClades.sort((a, b) => {
-        if (b.aliveCount !== a.aliveCount) return b.aliveCount - a.aliveCount;
-        if (b.totalEnergy !== a.totalEnergy) return b.totalEnergy - a.totalEnergy;
-        return b.kills - a.kills;
-      });
-
-      // Check victory condition
-      const survivingClades = this.competingClades.filter(cl => cl.aliveCount > 0);
-      if (survivingClades.length <= 1 && this.competingClades.length > 1) {
-        this.isComplete = true;
-        this.winner = survivingClades[0] || this.competingClades[0] || null;
-      }
-    }
-
-    return {
-      isComplete: this.isComplete,
-      winner: this.winner,
-      stormRadius: this.stormRadius,
-      leaderboard: this.competingClades
-    };
-  }
-
-  /**
-   * Renders the glowing radiation storm ring and hazard zone onto the world canvas.
-   * @param {CanvasRenderingContext2D} ctx
-   */
-  draw(ctx) {
-    if (!this.isActive || !ctx) return;
-
-    ctx.save();
-
-    // Outer radiation hazard ring stroke (thick semi-transparent hazard aura)
-    const hazardBandWidth = 360;
-    ctx.beginPath();
-    ctx.arc(this.centerX, this.centerY, this.stormRadius + hazardBandWidth / 2, 0, Math.PI * 2);
-    ctx.strokeStyle = 'rgba(244, 63, 94, 0.14)';
-    ctx.lineWidth = hazardBandWidth;
-    ctx.stroke();
-
-    // Secondary violet radiation ring
-    ctx.beginPath();
-    ctx.arc(this.centerX, this.centerY, this.stormRadius + 14, 0, Math.PI * 2);
-    ctx.strokeStyle = '#c084fc';
-    ctx.lineWidth = 3;
-    if (typeof ctx.setLineDash === 'function') {
-      ctx.setLineDash([14, 10]);
-    }
-    ctx.stroke();
-
-    // Primary pulsing crimson storm wall
-    ctx.beginPath();
-    ctx.arc(this.centerX, this.centerY, this.stormRadius, 0, Math.PI * 2);
-    ctx.strokeStyle = '#f43f5e';
-    ctx.lineWidth = 4.5;
-    if (typeof ctx.setLineDash === 'function') {
-      ctx.setLineDash([]);
-    }
-    ctx.stroke();
-
-    ctx.restore();
-  }
-}
-
-
 /* --- src/charts.js --- */
 /**
  * Artificial Life Simulator - Evolutionary Analytics & Charts
@@ -7740,6 +7035,711 @@ class SoundSynthesizer {
 
 // Global singleton instance for easy import
 const sound = new SoundSynthesizer();
+
+
+/* --- src/neuralVisualizer.js --- */
+/**
+ * Artificial Life Simulator - Live Neural Network Visualizer
+ * Renders real-time 10->8->4 feedforward perceptron topology, synaptic weights,
+ * glowing node activations, and sensory/motor telemetry inside the Creature Inspector.
+ */
+
+
+
+
+const INPUT_LABELS = [
+  'Food Dist',
+  'Food Ang',
+  'Danger',
+  'Threat Dist',
+  'Threat Ang',
+  'Mate Dist',
+  'Mate Ang',
+  'Energy',
+  'Drag',
+  'Solar'
+];
+
+const OUTPUT_LABELS = [
+  'Steer',
+  'Thrust',
+  'Court',
+  'Attack'
+];
+
+class NeuralVisualizer {
+  /**
+   * @param {HTMLCanvasElement|Object|null} canvas
+   */
+  constructor(canvas) {
+    this.canvas = canvas || null;
+    this.ctx = (this.canvas && typeof this.canvas.getContext === 'function')
+      ? this.canvas.getContext('2d')
+      : null;
+    this.INPUT_LABELS = INPUT_LABELS;
+    this.OUTPUT_LABELS = OUTPUT_LABELS;
+  }
+
+  /**
+   * Renders the live neural topology, synaptic weights, and node activations.
+   * @param {NeuralBrain|null} brain
+   * @param {'neural'|'heuristic'|string} [brainType='neural']
+   */
+  render(brain, brainType = 'neural') {
+    if (!this.canvas || !this.ctx) return;
+
+    const ctx = this.ctx;
+    const width = this.canvas.width || 268;
+    const height = this.canvas.height || 165;
+
+    ctx.clearRect(0, 0, width, height);
+    ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
+    ctx.fillRect(0, 0, width, height);
+
+    if (brainType !== 'neural' || !brain) {
+      ctx.save();
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.font = 'bold 12px sans-serif';
+      ctx.fillStyle = '#38bdf8';
+      ctx.fillText('Heuristic Rule Brain', width * 0.5, height * 0.45);
+      ctx.font = '10px sans-serif';
+      ctx.fillStyle = '#94a3b8';
+      ctx.fillText('Click Brain badge to switch to Neural', width * 0.5, height * 0.60);
+      ctx.restore();
+      return;
+    }
+
+    const numIn = BRAIN_CONFIG.INPUT_SIZE;
+    const numHid = BRAIN_CONFIG.HIDDEN_SIZE;
+    const numOut = BRAIN_CONFIG.OUTPUT_SIZE;
+
+    const col1X = 52;
+    const col2X = width * 0.5;
+    const col3X = width - 48;
+
+    const padYIn = 12;
+    const padYHid = 18;
+    const padYOut = 30;
+
+    const inCoords = [];
+    for (let i = 0; i < numIn; i++) {
+      const y = numIn > 1
+        ? padYIn + (i / (numIn - 1)) * (height - padYIn * 2)
+        : height * 0.5;
+      inCoords.push({ x: col1X, y });
+    }
+
+    const hidCoords = [];
+    for (let h = 0; h < numHid; h++) {
+      const y = numHid > 1
+        ? padYHid + (h / (numHid - 1)) * (height - padYHid * 2)
+        : height * 0.5;
+      hidCoords.push({ x: col2X, y });
+    }
+
+    const outCoords = [];
+    for (let o = 0; o < numOut; o++) {
+      const y = numOut > 1
+        ? padYOut + (o / (numOut - 1)) * (height - padYOut * 2)
+        : height * 0.5;
+      outCoords.push({ x: col3X, y });
+    }
+
+    const weights = brain.weights || new Float32Array(BRAIN_CONFIG.TOTAL_WEIGHTS);
+    const inAct = (brain.activations && brain.activations.input) || new Float32Array(numIn);
+    const hidAct = (brain.activations && brain.activations.hidden) || new Float32Array(numHid);
+    const outAct = (brain.activations && brain.activations.output) || new Float32Array(numOut);
+
+    // 1. Render Layer 1 Synapses (Input -> Hidden, W1: 0..79)
+    for (let h = 0; h < numHid; h++) {
+      const rowOffset = h * numIn;
+      const dst = hidCoords[h];
+      for (let i = 0; i < numIn; i++) {
+        const w = weights[rowOffset + i] || 0;
+        const alpha = clamp(Math.abs(w) / 2.5, 0.08, 0.9);
+        const src = inCoords[i];
+        ctx.beginPath();
+        ctx.moveTo(src.x, src.y);
+        ctx.lineTo(dst.x, dst.y);
+        ctx.strokeStyle = w >= 0
+          ? `rgba(74, 222, 128, ${alpha.toFixed(3)})`
+          : `rgba(248, 113, 113, ${alpha.toFixed(3)})`;
+        ctx.lineWidth = alpha * 1.6;
+        ctx.stroke();
+      }
+    }
+
+    // 2. Render Layer 2 Synapses (Hidden -> Output, W2: 88..119)
+    const w2Offset = BRAIN_CONFIG.W2_OFFSET;
+    for (let o = 0; o < numOut; o++) {
+      const rowOffset = w2Offset + o * numHid;
+      const dst = outCoords[o];
+      for (let h = 0; h < numHid; h++) {
+        const w = weights[rowOffset + h] || 0;
+        const alpha = clamp(Math.abs(w) / 2.5, 0.08, 0.9);
+        const src = hidCoords[h];
+        ctx.beginPath();
+        ctx.moveTo(src.x, src.y);
+        ctx.lineTo(dst.x, dst.y);
+        ctx.strokeStyle = w >= 0
+          ? `rgba(74, 222, 128, ${alpha.toFixed(3)})`
+          : `rgba(248, 113, 113, ${alpha.toFixed(3)})`;
+        ctx.lineWidth = alpha * 1.8;
+        ctx.stroke();
+      }
+    }
+
+    // Helper to draw an activation node with glow
+    const drawNode = (x, y, val, isOutput0 = false) => {
+      const normVal = isOutput0 ? clamp(val / Math.PI, -1.0, 1.0) : clamp(val, -1.0, 1.0);
+      const intensity = clamp(Math.abs(normVal), 0.15, 1.0);
+
+      // Outer glow for strong activations
+      if (Math.abs(normVal) > 0.25) {
+        ctx.beginPath();
+        ctx.arc(x, y, 7.0, 0, Math.PI * 2);
+        ctx.fillStyle = normVal >= 0
+          ? `rgba(56, 189, 248, ${(intensity * 0.35).toFixed(3)})`
+          : `rgba(245, 158, 11, ${(intensity * 0.35).toFixed(3)})`;
+        ctx.fill();
+      }
+
+      ctx.beginPath();
+      ctx.arc(x, y, 4.5, 0, Math.PI * 2);
+      if (Math.abs(normVal) < 0.05) {
+        ctx.fillStyle = '#1e293b';
+      } else if (normVal > 0) {
+        ctx.fillStyle = normVal > 0.5 ? '#4ade80' : '#38bdf8';
+      } else {
+        ctx.fillStyle = normVal < -0.5 ? '#ef4444' : '#f59e0b';
+      }
+      ctx.fill();
+      ctx.strokeStyle = '#94a3b8';
+      ctx.lineWidth = 1.0;
+      ctx.stroke();
+    };
+
+    // 3. Render Input Nodes & Labels
+    ctx.font = '9px sans-serif';
+    ctx.textBaseline = 'middle';
+    for (let i = 0; i < numIn; i++) {
+      const pt = inCoords[i];
+      const act = inAct[i] || 0;
+      drawNode(pt.x, pt.y, act, false);
+
+      ctx.textAlign = 'right';
+      ctx.fillStyle = '#cbd5e1';
+      ctx.fillText(this.INPUT_LABELS[i] || `In ${i}`, pt.x - 7, pt.y);
+    }
+
+    // 4. Render Hidden Nodes
+    for (let h = 0; h < numHid; h++) {
+      const pt = hidCoords[h];
+      const act = hidAct[h] || 0;
+      drawNode(pt.x, pt.y, act, false);
+    }
+
+    // 5. Render Output Nodes & Labels with Numeric Readout
+    for (let o = 0; o < numOut; o++) {
+      const pt = outCoords[o];
+      const act = outAct[o] || 0;
+      drawNode(pt.x, pt.y, act, o === 0);
+
+      ctx.textAlign = 'left';
+      ctx.fillStyle = '#e2e8f0';
+      const label = this.OUTPUT_LABELS[o] || `Out ${o}`;
+      const valStr = o === 0 ? `${(act * 180 / Math.PI).toFixed(0)}°` : act.toFixed(2);
+      ctx.fillText(`${label} ${valStr}`, pt.x + 7, pt.y);
+    }
+  }
+}
+
+
+/* --- src/arena.js --- */
+/**
+ * Artificial Life Simulator - Species Arena Battle Royale Tournament Mode
+ * Pits 4 distinct genetic clades against each other inside a shrinking
+ * high-radiation storm ring until a single champion clade survives.
+ */
+
+
+
+
+
+
+class ArenaTournament {
+  /**
+   * @param {import('./world.js').World} world
+   * @param {Object} [options={}]
+   */
+  constructor(world, options = {}) {
+    this.world = world;
+    this.centerX = options.centerX ?? (world ? world.width / 2 : 1400);
+    this.centerY = options.centerY ?? (world ? world.height / 2 : 900);
+    this.initialRadius = options.initialRadius ?? 1200;
+    this.minRadius = options.minRadius ?? 80;
+    this.duration = options.duration ?? 90; // seconds
+    this.radiationDamagePerSec = options.radiationDamagePerSec ?? 25;
+    this.organismsPerClade = options.organismsPerClade ?? 10;
+
+    this.stormRadius = this.initialRadius;
+    this.elapsedTime = 0;
+    this.isActive = false;
+    this.isComplete = false;
+    this.competingClades = [];
+    this.winner = null;
+    this.worldSnapshot = null;
+  }
+
+  /**
+   * Saves the current sandbox world state so exiting Arena restores the exact prior state.
+   */
+  snapshotWorld() {
+    if (!this.world) return;
+
+    const speciesClone = new Map();
+    if (this.world.speciesRegistry) {
+      for (const [id, record] of this.world.speciesRegistry.entries()) {
+        speciesClone.set(id, {
+          ...record,
+          representativeGenome: record.representativeGenome ? record.representativeGenome.clone() : null
+        });
+      }
+    }
+
+    const foodClone = this.world.foodManager
+      ? this.world.foodManager.foodList.map(f => ({
+          x: f.position.x,
+          y: f.position.y,
+          type: f.type,
+          energy: f.energy,
+          maxEnergy: f.maxEnergy,
+          age: f.age,
+          rotDuration: f.rotDuration,
+          rotTimer: f.rotTimer
+        }))
+      : [];
+
+    this.worldSnapshot = {
+      creatures: [...this.world.creatures],
+      colonies: [...(this.world.colonies || [])],
+      food: foodClone,
+      time: this.world.time,
+      dayCount: this.world.dayCount,
+      timeOfDay: this.world.timeOfDay,
+      temperature: this.world.temperature,
+      targetTemperature: this.world.targetTemperature,
+      climateState: this.world.climateState,
+      climateCycleTimer: this.world.climateCycleTimer,
+      foodGrowthMultiplier: this.world.foodGrowthMultiplier,
+      mutationMultiplier: this.world.mutationMultiplier,
+      kineticCostMultiplier: this.world.kineticCostMultiplier,
+      temperatureOverride: this.world.temperatureOverride,
+      showDeathMessages: this.world.showDeathMessages,
+      speciesRegistry: speciesClone,
+      fossilRecord: [...(this.world.fossilRecord || [])]
+    };
+  }
+
+  /**
+   * Restores the saved sandbox snapshot back to `this.world`.
+   */
+  restoreWorld() {
+    if (!this.world) return;
+
+    if (this.worldSnapshot) {
+      const snap = this.worldSnapshot;
+      this.world.creatures = [...snap.creatures];
+      this.world.colonies = [...snap.colonies];
+      this.world.time = snap.time;
+      this.world.dayCount = snap.dayCount;
+      this.world.timeOfDay = snap.timeOfDay;
+      this.world.temperature = snap.temperature;
+      this.world.targetTemperature = snap.targetTemperature;
+      this.world.climateState = snap.climateState;
+      this.world.climateCycleTimer = snap.climateCycleTimer;
+      this.world.foodGrowthMultiplier = snap.foodGrowthMultiplier;
+      this.world.mutationMultiplier = snap.mutationMultiplier;
+      this.world.kineticCostMultiplier = snap.kineticCostMultiplier;
+      this.world.temperatureOverride = snap.temperatureOverride;
+      this.world.showDeathMessages = snap.showDeathMessages;
+      this.world.speciesRegistry = snap.speciesRegistry;
+      this.world.fossilRecord = [...snap.fossilRecord];
+
+      if (this.world.creatureGrid) {
+        this.world.creatureGrid.clear();
+        for (const c of this.world.creatures) {
+          if (c.isAlive) {
+            this.world.creatureGrid.insert(c);
+          }
+        }
+      }
+
+      if (this.world.foodManager) {
+        this.world.foodManager.clear();
+        for (const item of snap.food) {
+          const pellet = new FoodPellet(item.x, item.y, item.type, item.energy);
+          pellet.maxEnergy = item.maxEnergy;
+          pellet.age = item.age;
+          pellet.rotDuration = item.rotDuration;
+          pellet.rotTimer = item.rotTimer;
+          this.world.foodManager.foodList.push(pellet);
+          this.world.foodManager.spatialGrid.insert(pellet);
+        }
+      }
+
+      this.worldSnapshot = null;
+    }
+
+    this.isActive = false;
+    this.isComplete = false;
+    this.winner = null;
+  }
+
+  /**
+   * Builds default neural warrior clade templates to fill up to 4 competing clades.
+   * @returns {Array<{speciesId: string, name: string, genome: Genome}>}
+   */
+  _createDefaultWarriorClades() {
+    return [
+      {
+        speciesId: 'clade_crimson_fang',
+        name: 'Crimson Fang (Apex)',
+        genome: new Genome({
+          speciesId: 'clade_crimson_fang',
+          speed: 3.8,
+          sense: 165,
+          size: 13.5,
+          diet: 0.92,
+          bravery: 0.92,
+          armor: 0.45,
+          brainType: 'neural'
+        })
+      },
+      {
+        speciesId: 'clade_obsidian_titan',
+        name: 'Obsidian Juggernaut',
+        genome: new Genome({
+          speciesId: 'clade_obsidian_titan',
+          speed: 2.7,
+          sense: 135,
+          size: 17.5,
+          diet: 0.78,
+          bravery: 0.88,
+          armor: 0.85,
+          brainType: 'neural'
+        })
+      },
+      {
+        speciesId: 'clade_emerald_viper',
+        name: 'Emerald Viper (Skirmisher)',
+        genome: new Genome({
+          speciesId: 'clade_emerald_viper',
+          speed: 4.4,
+          sense: 185,
+          size: 9.0,
+          diet: 0.55,
+          bravery: 0.72,
+          armor: 0.25,
+          camouflage: 0.85,
+          brainType: 'neural'
+        })
+      },
+      {
+        speciesId: 'clade_cobalt_swarm',
+        name: 'Cobalt Phalanx (Grazers)',
+        genome: new Genome({
+          speciesId: 'clade_cobalt_swarm',
+          speed: 3.6,
+          sense: 160,
+          size: 10.5,
+          diet: 0.22,
+          bravery: 0.65,
+          armor: 0.65,
+          flocking: 0.9,
+          brainType: 'neural'
+        })
+      }
+    ];
+  }
+
+  /**
+   * Starts the Arena Battle Royale tournament.
+   * @param {Array<Object>} [cladeSpecs=[]] Optional custom clade specifications
+   */
+  start(cladeSpecs = []) {
+    if (!this.world) return;
+
+    if (!this.isActive) {
+      this.snapshotWorld();
+    }
+
+    this.centerX = this.world.width / 2;
+    this.centerY = this.world.height / 2;
+
+    const selectedSpecs = [];
+
+    // 1. Use passed cladeSpecs if provided
+    if (Array.isArray(cladeSpecs) && cladeSpecs.length > 0) {
+      for (let i = 0; i < cladeSpecs.length; i++) {
+        const spec = cladeSpecs[i];
+        const baseGenome = spec.genome instanceof Genome
+          ? spec.genome.clone()
+          : new Genome(spec.genome || spec);
+        const spId = spec.speciesId || baseGenome.speciesId || `arena_clade_${i + 1}`;
+        baseGenome.speciesId = spId;
+        selectedSpecs.push({
+          speciesId: spId,
+          name: spec.name || spId,
+          genome: baseGenome,
+          count: spec.count ?? this.organismsPerClade
+        });
+      }
+    } else {
+      // 2. Otherwise pick top living species from current world
+      const speciesCounts = new Map();
+      for (const c of this.world.creatures) {
+        if (!c.isAlive) continue;
+        const spId = c.genome.speciesId;
+        const entry = speciesCounts.get(spId) || { count: 0, genome: c.genome };
+        entry.count++;
+        speciesCounts.set(spId, entry);
+      }
+
+      const sortedSpecies = Array.from(speciesCounts.entries())
+        .sort((a, b) => b[1].count - a[1].count)
+        .slice(0, 4);
+
+      for (const [spId, info] of sortedSpecies) {
+        const g = info.genome.clone();
+        g.speciesId = spId;
+        selectedSpecs.push({
+          speciesId: spId,
+          name: `Species ${spId}`,
+          genome: g,
+          count: this.organismsPerClade
+        });
+      }
+
+      // Fill up to 4 with distinct neural warrior clades if fewer than 4 exist
+      const defaults = this._createDefaultWarriorClades();
+      let defIdx = 0;
+      while (selectedSpecs.length < 4 && defIdx < defaults.length) {
+        const candidate = defaults[defIdx++];
+        if (!selectedSpecs.some(s => s.speciesId === candidate.speciesId)) {
+          selectedSpecs.push({
+            ...candidate,
+            count: this.organismsPerClade
+          });
+        }
+      }
+    }
+
+    // Clear arena world
+    this.world.creatures = [];
+    this.world.colonies = [];
+    if (this.world.creatureGrid) this.world.creatureGrid.clear();
+    if (this.world.speciesRegistry) this.world.speciesRegistry.clear();
+    if (this.world.foodManager) {
+      this.world.foodManager.clear();
+      // Spawn central arena food pellets & golden berries
+      for (let i = 0; i < 140; i++) {
+        const angle = Math.random() * Math.PI * 2;
+        const dist = Math.sqrt(Math.random()) * (this.initialRadius * 0.72);
+        const fx = clamp(this.centerX + Math.cos(angle) * dist, 40, this.world.width - 40);
+        const fy = clamp(this.centerY + Math.sin(angle) * dist, 40, this.world.height - 40);
+        if (i % 7 === 0) {
+          this.world.foodManager.spawnBerry(fx, fy, 80);
+        } else {
+          this.world.foodManager.spawnPlant(fx, fy, 40);
+        }
+      }
+    }
+
+    this.competingClades = [];
+    const numClades = selectedSpecs.length;
+    const spawnRingRadius = this.initialRadius * 0.55;
+
+    for (let i = 0; i < numClades; i++) {
+      const spec = selectedSpecs[i];
+      const sectorAngle = (i / Math.max(1, numClades)) * Math.PI * 2;
+      const sectorCenterX = this.centerX + Math.cos(sectorAngle) * spawnRingRadius;
+      const sectorCenterY = this.centerY + Math.sin(sectorAngle) * spawnRingRadius;
+      const orgCount = spec.count ?? this.organismsPerClade;
+
+      for (let j = 0; j < orgCount; j++) {
+        const subAngle = (j / Math.max(1, orgCount)) * Math.PI * 2;
+        const jitterR = orgCount > 1 ? randomFloat(18, 65) : 0;
+        const cx = clamp(sectorCenterX + Math.cos(subAngle) * jitterR, 40, this.world.width - 40);
+        const cy = clamp(sectorCenterY + Math.sin(subAngle) * jitterR, 40, this.world.height - 40);
+
+        const g = spec.genome.clone();
+        g.speciesId = spec.speciesId;
+        const c = new Creature(cx, cy, g, 140);
+        // Orient inward toward arena center
+        c.heading = Math.atan2(this.centerY - cy, this.centerX - cx);
+        this.world.creatures.push(c);
+        if (this.world.creatureGrid) this.world.creatureGrid.insert(c);
+        if (typeof this.world.registerCreatureSpecies === 'function') {
+          this.world.registerCreatureSpecies(c, null);
+        }
+      }
+
+      this.competingClades.push({
+        speciesId: spec.speciesId,
+        name: spec.name || spec.speciesId,
+        color: spec.genome.color ? spec.genome.color.bodyCss : '#38bdf8',
+        initialCount: orgCount,
+        aliveCount: orgCount,
+        kills: 0,
+        totalEnergy: orgCount * 140
+      });
+    }
+
+    this.stormRadius = this.initialRadius;
+    this.elapsedTime = 0;
+    this.isActive = true;
+    this.isComplete = false;
+    this.winner = null;
+  }
+
+  /**
+   * Stops the Arena tournament and restores the sandbox world state.
+   */
+  stop() {
+    this.restoreWorld();
+  }
+
+  /**
+   * Updates the shrinking radiation storm ring, applies out-of-bounds damage,
+   * refreshes the clade survival leaderboard, and checks victory conditions.
+   * @param {number} dt Delta time in seconds
+   * @returns {{isComplete: boolean, winner: Object|null, stormRadius: number, leaderboard: Array<Object>}}
+   */
+  update(dt) {
+    if (!this.isActive || !this.world) {
+      return {
+        isComplete: this.isComplete,
+        winner: this.winner,
+        stormRadius: this.stormRadius,
+        leaderboard: this.competingClades
+      };
+    }
+
+    if (!this.isComplete) {
+      this.elapsedTime += dt;
+      const progress = clamp(this.elapsedTime / this.duration, 0, 1);
+      this.stormRadius = this.initialRadius - (this.initialRadius - this.minRadius) * progress;
+
+      // Apply out-of-bounds radiation damage
+      for (const c of this.world.creatures) {
+        if (!c.isAlive) continue;
+        const dx = c.position.x - this.centerX;
+        const dy = c.position.y - this.centerY;
+        const d = Math.sqrt(dx * dx + dy * dy);
+
+        if (d > this.stormRadius) {
+          c.energy -= this.radiationDamagePerSec * dt;
+          if (c.energy <= 0) {
+            if (typeof c.die === 'function') {
+              c.die('disaster');
+            } else {
+              c.isAlive = false;
+              c.causeOfDeath = 'disaster';
+            }
+          }
+        }
+      }
+
+      // Refresh competing clade statistics
+      const cladeMap = new Map();
+      for (const clade of this.competingClades) {
+        clade.aliveCount = 0;
+        clade.kills = 0;
+        clade.totalEnergy = 0;
+        cladeMap.set(clade.speciesId, clade);
+      }
+
+      for (const c of this.world.creatures) {
+        let clade = cladeMap.get(c.genome.speciesId);
+        if (!clade && this.competingClades.length > 0) {
+          // Offspring that speciated during arena battle belong to their closest competing clade
+          let bestClade = this.competingClades[0];
+          clade = bestClade;
+        }
+        if (clade) {
+          clade.kills += c.kills || 0;
+          if (c.isAlive) {
+            clade.aliveCount++;
+            clade.totalEnergy += c.energy;
+          }
+        }
+      }
+
+      // Sort leaderboard by aliveCount desc, then totalEnergy desc, then kills desc
+      this.competingClades.sort((a, b) => {
+        if (b.aliveCount !== a.aliveCount) return b.aliveCount - a.aliveCount;
+        if (b.totalEnergy !== a.totalEnergy) return b.totalEnergy - a.totalEnergy;
+        return b.kills - a.kills;
+      });
+
+      // Check victory condition
+      const survivingClades = this.competingClades.filter(cl => cl.aliveCount > 0);
+      if (survivingClades.length <= 1 && this.competingClades.length > 1) {
+        this.isComplete = true;
+        this.winner = survivingClades[0] || this.competingClades[0] || null;
+      }
+    }
+
+    return {
+      isComplete: this.isComplete,
+      winner: this.winner,
+      stormRadius: this.stormRadius,
+      leaderboard: this.competingClades
+    };
+  }
+
+  /**
+   * Renders the glowing radiation storm ring and hazard zone onto the world canvas.
+   * @param {CanvasRenderingContext2D} ctx
+   */
+  draw(ctx) {
+    if (!this.isActive || !ctx) return;
+
+    ctx.save();
+
+    // Outer radiation hazard ring stroke (thick semi-transparent hazard aura)
+    const hazardBandWidth = 360;
+    ctx.beginPath();
+    ctx.arc(this.centerX, this.centerY, this.stormRadius + hazardBandWidth / 2, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(244, 63, 94, 0.14)';
+    ctx.lineWidth = hazardBandWidth;
+    ctx.stroke();
+
+    // Secondary violet radiation ring
+    ctx.beginPath();
+    ctx.arc(this.centerX, this.centerY, this.stormRadius + 14, 0, Math.PI * 2);
+    ctx.strokeStyle = '#c084fc';
+    ctx.lineWidth = 3;
+    if (typeof ctx.setLineDash === 'function') {
+      ctx.setLineDash([14, 10]);
+    }
+    ctx.stroke();
+
+    // Primary pulsing crimson storm wall
+    ctx.beginPath();
+    ctx.arc(this.centerX, this.centerY, this.stormRadius, 0, Math.PI * 2);
+    ctx.strokeStyle = '#f43f5e';
+    ctx.lineWidth = 4.5;
+    if (typeof ctx.setLineDash === 'function') {
+      ctx.setLineDash([]);
+    }
+    ctx.stroke();
+
+    ctx.restore();
+  }
+}
 
 
 

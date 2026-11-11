@@ -6,7 +6,8 @@
   "scripts": {
     "test": "node tests/test_simulation.js",
     "review": "node tests/review_game.js",
-    "build": "node scripts/build_standalone.js"
+    "build": "node scripts/build_standalone.js",
+    "deploy": "npx wrangler pages deploy dist --project-name artificial-life-simulator"
   },
   "keywords": [
     "artificial-life",

@@ -17,16 +17,16 @@ function stripImportsExports(code) {
 const moduleFiles = [
   'src/math.js',
   'src/neuralBrain.js',
-  'src/neuralVisualizer.js',
   'src/spatialGrid.js',
   'src/food.js',
   'src/genome.js',
   'src/creature.js',
   'src/colony.js',
   'src/world.js',
-  'src/arena.js',
   'src/charts.js',
-  'src/audio.js'
+  'src/audio.js',
+  'src/neuralVisualizer.js',
+  'src/arena.js'
 ];
 
 let coreBundle = '/* ==================== BUNDLED CORE ENGINE ==================== */\n';
@@ -311,4 +311,17 @@ ${appJsContent}
 const finalHtml = templateHtml.replace('<!-- SCRIPT_PLACEHOLDER -->', finalScript);
 
 fs.writeFileSync(path.join(rootDir, 'index.html'), finalHtml, 'utf8');
-console.log('Successfully generated clean standalone index.html with death message toggle and tutorial!');
+
+const distDir = path.join(rootDir, 'dist');
+fs.mkdirSync(distDir, { recursive: true });
+fs.writeFileSync(path.join(distDir, 'index.html'), finalHtml, 'utf8');
+
+const headersContent = `/*
+  X-Frame-Options: DENY
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  Cache-Control: public, max-age=3600
+`;
+fs.writeFileSync(path.join(distDir, '_headers'), headersContent, 'utf8');
+
+console.log('Successfully generated clean standalone index.html and Cloudflare Pages dist/ bundle!');
