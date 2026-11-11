@@ -375,6 +375,7 @@ const toxicPrey = new Creature(530, 500, new Genome({
   diet: 0.1,
   size: 8,
   armor: 0.85,
+  bravery: 0.685,
   camouflage: 0.0
 }));
 preyCreatureGrid.insert(toxicPrey);
@@ -428,6 +429,241 @@ const possessedResult = neuralDispatchCreature.evaluateBehavior({});
 assert(possessedResult.action === 'possessed', 'Player possession takes precedence over neural brain');
 assert(neuralDispatchCreature.state === 'possessed', 'Possessed creature state is possessed');
 neuralDispatchCreature.isPossessed = false;
+
+console.log('--- Testing Task 4: Dynamic Chromatophores & Aposematic Mimicry ---');
+
+// 1. Dynamic Chromatophore Initialization & effectiveColorCss
+const defaultChromaCreature = new Creature(500, 500);
+assert(defaultChromaCreature.chromatophoreColor !== undefined, 'Creature initializes chromatophoreColor');
+assert(typeof defaultChromaCreature.chromatophoreColor.r === 'number', 'chromatophoreColor.r is number');
+assert(typeof defaultChromaCreature.chromatophoreColor.g === 'number', 'chromatophoreColor.g is number');
+assert(typeof defaultChromaCreature.chromatophoreColor.b === 'number', 'chromatophoreColor.b is number');
+assert(typeof defaultChromaCreature.effectiveColorCss === 'string', 'effectiveColorCss returns string');
+assert(defaultChromaCreature.effectiveColorCss.startsWith('rgb('), 'effectiveColorCss returns rgb(...) format');
+
+// Fallback behavior when genome is undefined / missing
+const bareCreature = new Creature(100, 100);
+bareCreature.genome = null;
+bareCreature.chromatophoreColor = null;
+assert(bareCreature.effectiveColorCss === 'rgb(120, 140, 200)', 'effectiveColorCss handles null chromatophore with fallback');
+
+// 2. Chromatophore Color Shifting towards Biome Substrates
+const oasisCreature = new Creature(100, 100, new Genome({ chromatophore: 0.8, brainType: 'heuristic' }));
+const initialOasisRgb = { ...oasisCreature.chromatophoreColor };
+const oasisEnv = {
+  getBiomeAt: () => ({ id: 'oasis' }),
+  worldWidth: 2000,
+  worldHeight: 2000
+};
+
+// Distance helper
+function rgbDistSq(c1, c2) {
+  const dr = c1.r - c2.r;
+  const dg = c1.g - c2.g;
+  const db = c1.b - c2.b;
+  return dr * dr + dg * dg + db * db;
+}
+
+const targetOasis = { r: 34, g: 197, b: 94 };
+const initialDist = rgbDistSq(initialOasisRgb, targetOasis);
+
+// Step 1: Run single update with dt = 0.1
+// t = 0.8 * 0.1 * 2.0 = 0.16
+oasisCreature.update(0.1, oasisEnv);
+const afterOneStepDist = rgbDistSq(oasisCreature.chromatophoreColor, targetOasis);
+assert(afterOneStepDist < initialDist, 'Chromatophore shifts closer to oasis substrate after 1 update');
+
+// Step 2: Run 40 additional updates, should strongly converge to oasis RGB
+for (let i = 0; i < 40; i++) {
+  oasisCreature.update(0.1, oasisEnv);
+}
+assertApprox(oasisCreature.chromatophoreColor.r, 34, 1.5, 'Chromatophore R converged to oasis substrate 34');
+assertApprox(oasisCreature.chromatophoreColor.g, 197, 1.5, 'Chromatophore G converged to oasis substrate 197');
+assertApprox(oasisCreature.chromatophoreColor.b, 94, 1.5, 'Chromatophore B converged to oasis substrate 94');
+assert(oasisCreature.effectiveColorCss === 'rgb(34, 197, 94)', 'effectiveColorCss matches oasis substrate');
+
+// Test other biome substrates: desert, marsh, volcanic
+const desertCreature = new Creature(100, 100, new Genome({ chromatophore: 0.9, brainType: 'heuristic' }));
+const desertEnv = { getBiomeAt: () => ({ id: 'desert' }), worldWidth: 1000, worldHeight: 1000 };
+for (let i = 0; i < 50; i++) desertCreature.update(0.1, desertEnv);
+assertApprox(desertCreature.chromatophoreColor.r, 245, 1.5, 'Desert substrate R ~ 245');
+assertApprox(desertCreature.chromatophoreColor.g, 158, 1.5, 'Desert substrate G ~ 158');
+assertApprox(desertCreature.chromatophoreColor.b, 11, 1.5, 'Desert substrate B ~ 11');
+
+const marshCreature = new Creature(100, 100, new Genome({ chromatophore: 0.9, brainType: 'heuristic' }));
+const marshEnv = { getBiomeAt: () => ({ id: 'marsh' }), worldWidth: 1000, worldHeight: 1000 };
+for (let i = 0; i < 50; i++) marshCreature.update(0.1, marshEnv);
+assertApprox(marshCreature.chromatophoreColor.r, 56, 1.5, 'Marsh substrate R ~ 56');
+assertApprox(marshCreature.chromatophoreColor.g, 189, 1.5, 'Marsh substrate G ~ 189');
+assertApprox(marshCreature.chromatophoreColor.b, 248, 1.5, 'Marsh substrate B ~ 248');
+
+const volcanicCreature = new Creature(100, 100, new Genome({ chromatophore: 0.9, brainType: 'heuristic' }));
+const volcanicEnv = { getBiomeAt: () => ({ id: 'volcanic' }), worldWidth: 1000, worldHeight: 1000 };
+for (let i = 0; i < 50; i++) volcanicCreature.update(0.1, volcanicEnv);
+assertApprox(volcanicCreature.chromatophoreColor.r, 239, 1.5, 'Volcanic substrate R ~ 239');
+assertApprox(volcanicCreature.chromatophoreColor.g, 68, 1.5, 'Volcanic substrate G ~ 68');
+assertApprox(volcanicCreature.chromatophoreColor.b, 68, 1.5, 'Volcanic substrate B ~ 68');
+
+// 3. Zero Chromatophore Gene Prevents Color Shifting
+const staticCreature = new Creature(100, 100, new Genome({ chromatophore: 0.0, brainType: 'heuristic' }));
+const staticInitialRgb = { ...staticCreature.chromatophoreColor };
+const staticInitialCss = staticCreature.effectiveColorCss;
+for (let i = 0; i < 30; i++) {
+  staticCreature.update(0.1, oasisEnv);
+}
+assert(staticCreature.chromatophoreColor.r === staticInitialRgb.r, 'Zero chromatophore preserves R');
+assert(staticCreature.chromatophoreColor.g === staticInitialRgb.g, 'Zero chromatophore preserves G');
+assert(staticCreature.chromatophoreColor.b === staticInitialRgb.b, 'Zero chromatophore preserves B');
+assert(staticCreature.effectiveColorCss === staticInitialCss, 'Zero chromatophore preserves effectiveColorCss');
+
+// 4. Aposematic Warning Level & Batesian Mimicry
+// Genuine toxic/armored aposematism: (armor * bravery - 0.20) / 0.45
+const highGenuine = new Creature(0, 0, new Genome({ armor: 0.9, bravery: 0.8, camouflage: 0.2 }));
+// 0.9 * 0.8 = 0.72; (0.72 - 0.20) / 0.45 = 0.52 / 0.45 = 1.155 -> clamped 1.0
+assertApprox(highGenuine.aposematicWarningLevel, 1.0, 1e-4, 'Genuine high armor & bravery has warning level 1.0');
+
+const midGenuine = new Creature(0, 0, new Genome({ armor: 0.6, bravery: 0.6, camouflage: 0.1 }));
+// 0.6 * 0.6 = 0.36; (0.36 - 0.20) / 0.45 = 0.16 / 0.45 = 0.3555...
+assertApprox(midGenuine.aposematicWarningLevel, 0.3556, 0.01, 'Genuine moderate armor & bravery warning level calculated correctly');
+
+const lowGenuine = new Creature(0, 0, new Genome({ armor: 0.2, bravery: 0.2, camouflage: 0.1 }));
+// 0.2 * 0.2 = 0.04; (0.04 - 0.20) / 0.45 < 0 -> clamped 0.0
+assertApprox(lowGenuine.aposematicWarningLevel, 0.0, 1e-4, 'Harmless creature has genuine warning level 0.0');
+
+// Batesian mimicry: defenceless (armor 0, bravery 0) but high camouflage (> 0.65)
+// (camouflage - 0.65) / 0.35
+const perfectMimic = new Creature(0, 0, new Genome({ armor: 0.0, bravery: 0.0, camouflage: 1.0 }));
+assertApprox(perfectMimic.aposematicWarningLevel, 1.0, 1e-4, 'Batesian mimic with max camouflage has warning level 1.0');
+
+const partialMimic = new Creature(0, 0, new Genome({ armor: 0.0, bravery: 0.0, camouflage: 0.825 }));
+// (0.825 - 0.65) / 0.35 = 0.175 / 0.35 = 0.5
+assertApprox(partialMimic.aposematicWarningLevel, 0.5, 0.01, 'Batesian mimic with 0.825 camouflage has warning level 0.5');
+
+const lowCamoNonMimic = new Creature(0, 0, new Genome({ armor: 0.0, bravery: 0.0, camouflage: 0.5 }));
+assertApprox(lowCamoNonMimic.aposematicWarningLevel, 0.0, 1e-4, 'Creature with camouflage <= 0.65 has warning level 0.0');
+
+// 5. Sensory Pipeline Danger Signal from Aposematic & Mimic Prey
+const testPredator = new Creature(500, 500, new Genome({
+  diet: 0.95,
+  size: 16,
+  speed: 3.5,
+  sense: 120,
+  brainType: 'neural'
+}));
+
+// Test 5A: Targeting genuine aposematic prey
+const preyGridA = new SpatialGrid(64, 1000, 1000);
+const genuinePrey = new Creature(530, 500, new Genome({
+  diet: 0.1,
+  size: 7,
+  armor: 0.9,
+  bravery: 0.8,
+  camouflage: 0.1
+}));
+preyGridA.insert(genuinePrey);
+const resultA = testPredator.evaluateNeuralBehavior({ creatureGrid: preyGridA, worldWidth: 1000, worldHeight: 1000 });
+assert(testPredator.currentTarget === genuinePrey, 'Predator targets genuine prey');
+assertApprox(resultA.inputs[2], 1.0, 0.02, 'nearestFoodDangerSignal captures genuine aposematic warning level ~ 1.0');
+
+// Test 5B: Targeting Batesian mimic prey
+const preyGridB = new SpatialGrid(64, 1000, 1000);
+const mimicPrey = new Creature(530, 500, new Genome({
+  diet: 0.1,
+  size: 7,
+  armor: 0.0,
+  bravery: 0.0,
+  camouflage: 0.95 // mimic level = (0.95 - 0.65)/0.35 = 0.857
+}));
+preyGridB.insert(mimicPrey);
+const resultB = testPredator.evaluateNeuralBehavior({ creatureGrid: preyGridB, worldWidth: 1000, worldHeight: 1000 });
+assert(testPredator.currentTarget === mimicPrey, 'Predator targets mimic prey');
+assertApprox(resultB.inputs[2], 0.857, 0.03, 'nearestFoodDangerSignal reflects deceptive danger from Batesian mimic ~ 0.857');
+
+// Test 5C: Targeting harmless non-aposematic prey
+const preyGridC = new SpatialGrid(64, 1000, 1000);
+const harmlessPrey = new Creature(530, 500, new Genome({
+  diet: 0.1,
+  size: 7,
+  armor: 0.1,
+  bravery: 0.1,
+  camouflage: 0.2
+}));
+preyGridC.insert(harmlessPrey);
+const resultC = testPredator.evaluateNeuralBehavior({ creatureGrid: preyGridC, worldWidth: 1000, worldHeight: 1000 });
+assert(testPredator.currentTarget === harmlessPrey, 'Predator targets harmless prey');
+assertApprox(resultC.inputs[2], 0.0, 1e-4, 'nearestFoodDangerSignal is 0.0 for harmless non-aposematic prey');
+
+// 6. Mock Canvas Draw Tests (Warning Bands & Dynamic Fill)
+function createMockContext() {
+  const strokeStyles = [];
+  const fillStyles = [];
+  const lineDashes = [];
+  const calls = [];
+
+  const ctx = {
+    calls,
+    strokeStyles,
+    fillStyles,
+    lineDashes,
+    save: () => calls.push('save'),
+    restore: () => calls.push('restore'),
+    translate: () => calls.push('translate'),
+    rotate: () => calls.push('rotate'),
+    scale: () => calls.push('scale'),
+    beginPath: () => calls.push('beginPath'),
+    arc: () => calls.push('arc'),
+    moveTo: () => calls.push('moveTo'),
+    lineTo: () => calls.push('lineTo'),
+    quadraticCurveTo: () => calls.push('quadraticCurveTo'),
+    closePath: () => calls.push('closePath'),
+    fill: () => {
+      calls.push('fill');
+      fillStyles.push(ctx.fillStyle);
+    },
+    stroke: () => {
+      calls.push('stroke');
+      strokeStyles.push(ctx.strokeStyle);
+    },
+    fillText: () => calls.push('fillText'),
+    setLineDash: (d) => {
+      calls.push('setLineDash');
+      lineDashes.push(d);
+    },
+    strokeStyle: '',
+    fillStyle: '',
+    lineWidth: 1,
+    lineCap: 'round'
+  };
+  return ctx;
+}
+
+// 6A: Aposematic Creature (warningLevel > 0.35) renders yellow and black warning bands
+const aposematicCreature = new Creature(100, 100, new Genome({
+  armor: 0.9,
+  bravery: 0.9,
+  chromatophore: 0.7
+}));
+assert(aposematicCreature.aposematicWarningLevel > 0.35, 'Creature exceeds warning level threshold 0.35');
+const mockCtxA = createMockContext();
+aposematicCreature.draw(mockCtxA);
+assert(mockCtxA.strokeStyles.includes('#facc15'), 'Aposematic warning band renders high-contrast yellow #facc15');
+assert(mockCtxA.strokeStyles.includes('#09090b'), 'Aposematic warning band renders obsidian black #09090b');
+assert(mockCtxA.lineDashes.length >= 2, 'Aposematic warning bands use setLineDash for dashed stripes');
+assert(mockCtxA.fillStyles.includes(aposematicCreature.effectiveColorCss), 'Body fill uses effectiveColorCss when chromatophore > 0.05');
+
+// 6B: Non-aposematic Creature does NOT render warning bands
+const nonAposematicCreature = new Creature(100, 100, new Genome({
+  armor: 0.1,
+  bravery: 0.1,
+  camouflage: 0.1,
+  chromatophore: 0.0
+}));
+assert(nonAposematicCreature.aposematicWarningLevel <= 0.35, 'Creature does not exceed warning level threshold 0.35');
+const mockCtxB = createMockContext();
+nonAposematicCreature.draw(mockCtxB);
+assert(!mockCtxB.strokeStyles.includes('#facc15'), 'Non-aposematic creature does not render yellow warning band');
+assert(!mockCtxB.strokeStyles.includes('#09090b'), 'Non-aposematic creature does not render black warning band');
+assert(mockCtxB.fillStyles.includes(nonAposematicCreature.genome.color.bodyCss), 'Body fill uses genome color bodyCss when chromatophore <= 0.05');
 
 console.log('--- Testing Piece 2: Creature Physics, Metabolism & AI ---');
 

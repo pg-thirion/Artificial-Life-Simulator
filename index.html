@@ -2842,6 +2842,36 @@ class Genome {
 
 let NEXT_CREATURE_ID = 1;
 
+/**
+ * Extracts or parses base RGB triplet from a creature genome or color representation.
+ * @param {Genome|Object} genome
+ * @returns {{r: number, g: number, b: number}}
+ */
+function getInitialGenomeRgb(genome) {
+  if (!genome) return { r: 120, g: 140, b: 200 };
+  const c = genome.color;
+  if (!c) return { r: 120, g: 140, b: 200 };
+  if (typeof c.r === 'number' && typeof c.g === 'number' && typeof c.b === 'number') {
+    return { r: c.r, g: c.g, b: c.b };
+  }
+  if (typeof c.hue === 'number' && typeof c.saturation === 'number' && typeof c.lightness === 'number') {
+    const rgb = hslToRgb(c.hue, c.saturation, c.lightness);
+    return { r: rgb.r, g: rgb.g, b: rgb.b };
+  }
+  if (typeof c.bodyCss === 'string') {
+    const hslMatch = c.bodyCss.match(/hsl\(\s*([\d.]+)\s*,\s*([\d.]+)%\s*,\s*([\d.]+)%\s*\)/);
+    if (hslMatch) {
+      const rgb = hslToRgb(parseFloat(hslMatch[1]), parseFloat(hslMatch[2]), parseFloat(hslMatch[3]));
+      return { r: rgb.r, g: rgb.g, b: rgb.b };
+    }
+    const rgbMatch = c.bodyCss.match(/rgb\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*\)/);
+    if (rgbMatch) {
+      return { r: parseFloat(rgbMatch[1]), g: parseFloat(rgbMatch[2]), b: parseFloat(rgbMatch[3]) };
+    }
+  }
+  return { r: 120, g: 140, b: 200 };
+}
+
 class Creature {
   /**
    * @param {number} x 
@@ -2918,6 +2948,11 @@ class Creature {
     // Neural sensory and motor telemetry
     this.lastNeuralInputs = null;
     this.lastNeuralOutputs = null;
+
+    // Dynamic chromatophore phenotypic coloration
+    const initialRgb = getInitialGenomeRgb(this.genome);
+    this._baseGenomeRgb = { r: initialRgb.r, g: initialRgb.g, b: initialRgb.b };
+    this.chromatophoreColor = { r: initialRgb.r, g: initialRgb.g, b: initialRgb.b };
   }
 
   /**
@@ -2930,6 +2965,43 @@ class Creature {
 
   set brainType(val) {
     this.genome.brainType = val;
+  }
+
+  /**
+   * Current dynamic skin color in CSS rgb format.
+   * Modulated by chromatophore camouflage blending.
+   * @returns {string} CSS rgb color string
+   */
+  get effectiveColorCss() {
+    const c = this.chromatophoreColor;
+    if (!c) {
+      return this.genome?.color?.bodyCss ?? 'rgb(120, 140, 200)';
+    }
+    const r = clamp(Math.round(c.r), 0, 255);
+    const g = clamp(Math.round(c.g), 0, 255);
+    const b = clamp(Math.round(c.b), 0, 255);
+    return `rgb(${r}, ${g}, ${b})`;
+  }
+
+  /**
+   * Genuine warning coloration or deceptive Batesian mimicry level [0, 1].
+   * - Genuine aposematism: toxic/armored and bold creatures signal danger.
+   * - Batesian mimicry: defenceless creatures with high camouflage mimic the warning.
+   * @returns {number} Normalized danger warning level [0, 1]
+   */
+  get aposematicWarningLevel() {
+    const armor = this.genome?.armor ?? 0.2;
+    const bravery = this.genome?.bravery ?? 0.5;
+    const camouflage = this.genome?.camouflage ?? 0.25;
+
+    // Base toxicity/armor signal: genuine = clamp((armor * bravery - 0.20) / 0.45, 0, 1)
+    const genuine = clamp((armor * bravery - 0.20) / 0.45, 0, 1);
+
+    // Batesian mimicry: defenceless creatures with high camouflage mimic toxic warning:
+    // (camouflage - 0.65) / 0.35 when camouflage > 0.65
+    const mimic = (camouflage > 0.65) ? clamp((camouflage - 0.65) / 0.35, 0, 1) : 0;
+
+    return clamp(Math.max(genuine, mimic), 0, 1);
   }
 
   /**
@@ -3569,6 +3641,43 @@ class Creature {
       this.matingCooldown -= dt;
     }
 
+    // 3.5 Dynamic Chromatophore Camouflage Blending
+    if (env && typeof env.getBiomeAt === 'function') {
+      if (!this.chromatophoreColor) {
+        const initRgb = getInitialGenomeRgb(this.genome);
+        this._baseGenomeRgb = { ...initRgb };
+        this.chromatophoreColor = { ...initRgb };
+      }
+      const biome = env.getBiomeAt(this.position.x, this.position.y);
+      const biomeId = typeof biome === 'string' ? biome : biome?.id;
+      let targetRgb;
+      switch (biomeId) {
+        case 'oasis':
+          targetRgb = { r: 34, g: 197, b: 94 };
+          break;
+        case 'desert':
+          targetRgb = { r: 245, g: 158, b: 11 };
+          break;
+        case 'marsh':
+          targetRgb = { r: 56, g: 189, b: 248 };
+          break;
+        case 'volcanic':
+          targetRgb = { r: 239, g: 68, b: 68 };
+          break;
+        default:
+          targetRgb = this._baseGenomeRgb || { r: 120, g: 140, b: 200 };
+          break;
+      }
+
+      const chromatophoreGene = this.genome?.chromatophore ?? 0.0;
+      const t = clamp(chromatophoreGene * dt * 2.0, 0.0, 1.0);
+      if (t > 0) {
+        this.chromatophoreColor.r = lerp(this.chromatophoreColor.r, targetRgb.r, t);
+        this.chromatophoreColor.g = lerp(this.chromatophoreColor.g, targetRgb.g, t);
+        this.chromatophoreColor.b = lerp(this.chromatophoreColor.b, targetRgb.b, t);
+      }
+    }
+
     // 4. Burn Primer Metabolic Energy
     const isHunting = this.state === 'hunting' || this.state === 'fleeing' || (this.brainType === 'neural' && (this.lastNeuralOutputs?.[3] ?? 0) > 0.45);
     const kineticMultiplier = env?.kineticMultiplier ?? 1.0;
@@ -3831,15 +3940,46 @@ class Creature {
     }
 
     // Main Body
+    const bodyFill = (this.genome?.chromatophore > 0.05) ? this.effectiveColorCss : colorInfo.bodyCss;
     ctx.beginPath();
     ctx.arc(0, 0, r, 0, Math.PI * 2);
-    ctx.fillStyle = colorInfo.bodyCss;
+    ctx.fillStyle = bodyFill;
     ctx.fill();
 
     // Membrane Stroke
     ctx.lineWidth = Math.max(1.5, r * 0.16);
     ctx.strokeStyle = isSelected ? '#38bdf8' : colorInfo.strokeCss;
     ctx.stroke();
+
+    // Distinctive Aposematic Warning Bands (yellow and black)
+    if (this.aposematicWarningLevel > 0.35) {
+      ctx.save();
+      const pulse = 1.0 + Math.sin(this.age * 4.0) * 0.08;
+      const ringRadius = Math.max(2.0, r * 0.72 * pulse);
+      const bandWidth = Math.max(2.0, r * 0.18);
+
+      // Warning Ring 1: High-contrast yellow
+      ctx.beginPath();
+      ctx.arc(0, 0, ringRadius, 0, Math.PI * 2);
+      ctx.strokeStyle = '#facc15';
+      ctx.lineWidth = bandWidth;
+      if (typeof ctx.setLineDash === 'function') {
+        ctx.setLineDash([Math.max(2, r * 0.45), Math.max(2, r * 0.30)]);
+      }
+      ctx.stroke();
+
+      // Warning Ring 2: Interleaved obsidian black
+      ctx.beginPath();
+      ctx.arc(0, 0, Math.max(1.0, ringRadius - bandWidth * 0.75), 0, Math.PI * 2);
+      ctx.strokeStyle = '#09090b';
+      ctx.lineWidth = Math.max(1.5, bandWidth * 0.65);
+      if (typeof ctx.setLineDash === 'function') {
+        ctx.setLineDash([Math.max(2, r * 0.30), Math.max(2, r * 0.45)]);
+      }
+      ctx.stroke();
+
+      ctx.restore();
+    }
 
     // Reset squash scale for feature details (eyes, mouth)
     ctx.scale(1.0 / squishX, 1.0 / squishY);
