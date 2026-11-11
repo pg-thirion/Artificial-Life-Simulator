@@ -9,6 +9,7 @@ import { SpatialGrid } from '../src/spatialGrid.js';
 import { FoodPellet, FoodManager } from '../src/food.js';
 import { Genome, GENE_BOUNDS } from '../src/genome.js';
 import { Creature } from '../src/creature.js';
+import { NeuralBrain, BRAIN_CONFIG } from '../src/neuralBrain.js';
 
 let passed = 0;
 let failed = 0;
@@ -70,6 +71,19 @@ const variance = samples.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / sample
 const stdDev = Math.sqrt(variance);
 assertApprox(mean, 100, 2.0, `Gaussian mean near 100 (got ${mean.toFixed(2)})`);
 assertApprox(stdDev, 15, 2.0, `Gaussian stdDev near 15 (got ${stdDev.toFixed(2)})`);
+
+console.log('--- Testing Neural Brain Math & Perceptron Engine ---');
+const simBrain = new NeuralBrain();
+assert(simBrain.weights.length === 124, 'NeuralBrain initializes with 124 synaptic weights');
+assert(simBrain.activations.output.length === 4, 'NeuralBrain allocates 4 output activations');
+const simOutputs = simBrain.forward(new Float32Array(10));
+assert(simOutputs.length === 4, 'NeuralBrain forward pass yields 4 motor outputs');
+assert(simOutputs[0] >= -Math.PI - 1e-5 && simOutputs[0] <= Math.PI + 1e-5, 'Neural steer angle delta within [-PI, PI]');
+assert(simOutputs[1] >= 0 && simOutputs[1] <= 1, 'Neural thrust magnitude within [0, 1]');
+const simMutated = NeuralBrain.mutateWeights(simBrain.weights, 0.1);
+assert(simMutated.length === 124, 'NeuralBrain mutation maintains 124 weights');
+const simCrossed = NeuralBrain.crossoverWeights(simBrain.weights, simMutated);
+assert(simCrossed.length === 124, 'NeuralBrain crossover yields 124 weights');
 
 console.log('--- Testing Piece 1: Spatial Hash Grid ---');
 
