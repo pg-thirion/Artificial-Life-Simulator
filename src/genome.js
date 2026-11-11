@@ -5,6 +5,7 @@
  */
 
 import { randomFloat, randomGaussian, clamp, lerp, geneticColor } from './math.js';
+import { NeuralBrain } from './neuralBrain.js';
 
 let NEXT_SPECIES_COUNTER = 1;
 
@@ -20,7 +21,10 @@ export const GENE_BOUNDS = {
   efficiency: { min: 0.6, max: 1.4, default: 1.0 },
   flocking: { min: 0.0, max: 1.0, default: 0.5 },
   armor: { min: 0.0, max: 1.0, default: 0.2 },
-  nocturnal: { min: 0.0, max: 1.0, default: 0.2 }
+  nocturnal: { min: 0.0, max: 1.0, default: 0.2 },
+  chromatophore: { min: 0.0, max: 1.0, default: 0.3 },
+  adhesion: { min: 0.0, max: 1.0, default: 0.1 },
+  symbiosis: { min: 0.0, max: 1.0, default: 0.2 }
 };
 
 export class Genome {
@@ -40,6 +44,16 @@ export class Genome {
     this.flocking = clamp(traits.flocking ?? GENE_BOUNDS.flocking.default, GENE_BOUNDS.flocking.min, GENE_BOUNDS.flocking.max);
     this.armor = clamp(traits.armor ?? GENE_BOUNDS.armor.default, GENE_BOUNDS.armor.min, GENE_BOUNDS.armor.max);
     this.nocturnal = clamp(traits.nocturnal ?? GENE_BOUNDS.nocturnal.default, GENE_BOUNDS.nocturnal.min, GENE_BOUNDS.nocturnal.max);
+    this.chromatophore = clamp(traits.chromatophore ?? GENE_BOUNDS.chromatophore.default, GENE_BOUNDS.chromatophore.min, GENE_BOUNDS.chromatophore.max);
+    this.adhesion = clamp(traits.adhesion ?? GENE_BOUNDS.adhesion.default, GENE_BOUNDS.adhesion.min, GENE_BOUNDS.adhesion.max);
+    this.symbiosis = clamp(traits.symbiosis ?? GENE_BOUNDS.symbiosis.default, GENE_BOUNDS.symbiosis.min, GENE_BOUNDS.symbiosis.max);
+
+    this.brainType = traits.brainType === 'heuristic' ? 'heuristic' : 'neural';
+    if (traits.brainWeights && traits.brainWeights.length >= 124) {
+      this.brainWeights = new Float32Array(traits.brainWeights);
+    } else {
+      this.brainWeights = NeuralBrain.randomWeights();
+    }
 
     this.generation = traits.generation ?? 1;
     this.speciesId = traits.speciesId ?? `sp_${NEXT_SPECIES_COUNTER++}`;
@@ -199,6 +213,31 @@ export class Genome {
       GENE_BOUNDS.nocturnal.max
     );
 
+    const newChromatophore = clamp(
+      randomGaussian(this.chromatophore, rate * 0.5),
+      GENE_BOUNDS.chromatophore.min,
+      GENE_BOUNDS.chromatophore.max
+    );
+
+    const newAdhesion = clamp(
+      randomGaussian(this.adhesion, rate * 0.5),
+      GENE_BOUNDS.adhesion.min,
+      GENE_BOUNDS.adhesion.max
+    );
+
+    const newSymbiosis = clamp(
+      randomGaussian(this.symbiosis, rate * 0.5),
+      GENE_BOUNDS.symbiosis.min,
+      GENE_BOUNDS.symbiosis.max
+    );
+
+    const newBrainWeights = NeuralBrain.mutateWeights(this.brainWeights, rate);
+
+    let newBrainType = this.brainType;
+    if (Math.random() < 0.02) {
+      newBrainType = newBrainType === 'neural' ? 'heuristic' : 'neural';
+    }
+
     const child = new Genome({
       speed: newSpeed,
       sense: newSense,
@@ -212,6 +251,11 @@ export class Genome {
       flocking: newFlocking,
       armor: newArmor,
       nocturnal: newNocturnal,
+      chromatophore: newChromatophore,
+      adhesion: newAdhesion,
+      symbiosis: newSymbiosis,
+      brainType: newBrainType,
+      brainWeights: newBrainWeights,
       generation: this.generation + 1,
       speciesId: this.speciesId
     });
@@ -238,6 +282,9 @@ export class Genome {
       return lerp(this[gene], partner[gene], randomFloat(0.2, 0.8));
     };
 
+    const childWeights = NeuralBrain.crossoverWeights(this.brainWeights, partner.brainWeights);
+    const childBrainType = Math.random() < 0.5 ? this.brainType : partner.brainType;
+
     const offspring = new Genome({
       speed: pick('speed'),
       sense: pick('sense'),
@@ -251,6 +298,11 @@ export class Genome {
       flocking: pick('flocking'),
       armor: pick('armor'),
       nocturnal: pick('nocturnal'),
+      chromatophore: pick('chromatophore'),
+      adhesion: pick('adhesion'),
+      symbiosis: pick('symbiosis'),
+      brainType: childBrainType,
+      brainWeights: childWeights,
       generation: Math.max(this.generation, partner.generation) + 1,
       speciesId: this.speciesId
     });
@@ -281,17 +333,34 @@ export class Genome {
     const dArmor = (this.armor ?? 0.2) - (other.armor ?? 0.2);
     const dNocturnal = (this.nocturnal ?? 0.2) - (other.nocturnal ?? 0.2);
     const dMeta = (this.metabolismRate - other.metabolismRate) / (GENE_BOUNDS.metabolismRate.max - GENE_BOUNDS.metabolismRate.min);
+    const dChromatophore = (this.chromatophore ?? GENE_BOUNDS.chromatophore.default) - (other.chromatophore ?? GENE_BOUNDS.chromatophore.default);
+    const dAdhesion = (this.adhesion ?? GENE_BOUNDS.adhesion.default) - (other.adhesion ?? GENE_BOUNDS.adhesion.default);
+    const dSymbiosis = (this.symbiosis ?? GENE_BOUNDS.symbiosis.default) - (other.symbiosis ?? GENE_BOUNDS.symbiosis.default);
+
+    let dSynaptic = 0;
+    if (this.brainWeights && other.brainWeights) {
+      let sumDiff = 0;
+      const len = Math.min(this.brainWeights.length, other.brainWeights.length);
+      for (let i = 0; i < len; i++) {
+        sumDiff += Math.abs(this.brainWeights[i] - other.brainWeights[i]);
+      }
+      dSynaptic = len > 0 ? (sumDiff / (len * 10.0)) : 0;
+    }
 
     // Weights: Diet and Size have highest evolutionary weight in morphological divergence
-    const wDiet = 0.30;
-    const wSize = 0.19;
-    const wSpeed = 0.15;
-    const wSense = 0.11;
-    const wCamouflage = 0.07;
-    const wArmor = 0.07;
-    const wNocturnal = 0.05;
+    const wDiet = 0.26;
+    const wSize = 0.16;
+    const wSpeed = 0.13;
+    const wSense = 0.09;
+    const wCamouflage = 0.05;
+    const wArmor = 0.05;
+    const wNocturnal = 0.04;
     const wBravery = 0.04;
     const wMeta = 0.02;
+    const wChromatophore = 0.04;
+    const wAdhesion = 0.04;
+    const wSymbiosis = 0.04;
+    const wSynaptic = 0.04;
 
     const distSq = 
       wDiet * (dDiet * dDiet) +
@@ -302,9 +371,22 @@ export class Genome {
       wArmor * (dArmor * dArmor) +
       wNocturnal * (dNocturnal * dNocturnal) +
       wBravery * (dBravery * dBravery) +
-      wMeta * (dMeta * dMeta);
+      wMeta * (dMeta * dMeta) +
+      wChromatophore * (dChromatophore * dChromatophore) +
+      wAdhesion * (dAdhesion * dAdhesion) +
+      wSymbiosis * (dSymbiosis * dSymbiosis) +
+      wSynaptic * (dSynaptic * dSynaptic);
 
     return Math.sqrt(distSq);
+  }
+
+  /**
+   * Alias for geneticDistance.
+   * @param {Genome} other 
+   * @returns {number}
+   */
+  distance(other) {
+    return this.geneticDistance(other);
   }
 
   /**
@@ -325,6 +407,11 @@ export class Genome {
       flocking: this.flocking,
       armor: this.armor,
       nocturnal: this.nocturnal,
+      chromatophore: this.chromatophore,
+      adhesion: this.adhesion,
+      symbiosis: this.symbiosis,
+      brainType: this.brainType,
+      brainWeights: new Float32Array(this.brainWeights),
       generation: this.generation,
       speciesId: this.speciesId
     });
@@ -348,6 +435,11 @@ export class Genome {
       flocking: this.flocking,
       armor: this.armor,
       nocturnal: this.nocturnal,
+      chromatophore: this.chromatophore,
+      adhesion: this.adhesion,
+      symbiosis: this.symbiosis,
+      brainType: this.brainType,
+      brainWeights: Array.from(this.brainWeights),
       generation: this.generation,
       speciesId: this.speciesId
     };

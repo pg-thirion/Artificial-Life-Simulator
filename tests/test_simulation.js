@@ -178,6 +178,113 @@ assert(herbColor.hue >= 90 && herbColor.hue <= 150, `Herbivore hue is green (got
 const carnColor = geneticColor(carnGenome);
 assert(carnColor.hue <= 30 || carnColor.hue >= 350, `Carnivore hue is reddish/crimson (got ${carnColor.hue})`);
 
+console.log('--- Testing Task 2: Synaptic DNA Encoding & Dual-Brain Genetics ---');
+
+// 1. Genome defaults for neural genes
+const defaultGenome = new Genome();
+assert(defaultGenome.brainType === 'neural', 'Default genome brainType is neural');
+assert(defaultGenome.brainWeights instanceof Float32Array, 'Default genome brainWeights is Float32Array');
+assert(defaultGenome.brainWeights.length === 124, 'Default genome has 124 synaptic weights');
+assertApprox(defaultGenome.chromatophore, 0.3, 1e-4, 'Default chromatophore is 0.3');
+assertApprox(defaultGenome.adhesion, 0.1, 1e-4, 'Default adhesion is 0.1');
+assertApprox(defaultGenome.symbiosis, 0.2, 1e-4, 'Default symbiosis is 0.2');
+
+const customGenome = new Genome({
+  brainType: 'heuristic',
+  chromatophore: 0.75,
+  adhesion: 0.85,
+  symbiosis: 0.95
+});
+assert(customGenome.brainType === 'heuristic', 'Custom genome honors brainType');
+assertApprox(customGenome.chromatophore, 0.75, 1e-4, 'Custom chromatophore preserved');
+assertApprox(customGenome.adhesion, 0.85, 1e-4, 'Custom adhesion preserved');
+assertApprox(customGenome.symbiosis, 0.95, 1e-4, 'Custom symbiosis preserved');
+
+// 2. Independent Float32Array on clone
+const clonedGenome = defaultGenome.clone();
+assert(clonedGenome.brainWeights instanceof Float32Array, 'Cloned genome has Float32Array weights');
+assert(clonedGenome.brainWeights.length === 124, 'Cloned genome weights length 124');
+assert(clonedGenome.brainWeights !== defaultGenome.brainWeights, 'Cloned brainWeights is an independent Float32Array instance');
+assertApprox(clonedGenome.brainWeights[0], defaultGenome.brainWeights[0], 1e-6, 'Cloned brainWeights initially equal');
+const originalW0 = defaultGenome.brainWeights[0];
+clonedGenome.brainWeights[0] += 1.5;
+assertApprox(defaultGenome.brainWeights[0], originalW0, 1e-6, 'Mutating cloned weights does not modify original genome weights');
+assert(clonedGenome.brainType === defaultGenome.brainType, 'Clone preserves brainType');
+assertApprox(clonedGenome.chromatophore, defaultGenome.chromatophore, 1e-4, 'Clone preserves chromatophore');
+assertApprox(clonedGenome.adhesion, defaultGenome.adhesion, 1e-4, 'Clone preserves adhesion');
+assertApprox(clonedGenome.symbiosis, defaultGenome.symbiosis, 1e-4, 'Clone preserves symbiosis');
+
+// 3. Mutation perturbing synaptic weights within [-5, 5]
+const mutChild = defaultGenome.mutate(2.0);
+assert(mutChild.brainWeights instanceof Float32Array, 'Mutated offspring has Float32Array brainWeights');
+assert(mutChild.brainWeights.length === 124, 'Mutated offspring has 124 weights');
+let allWithinBounds = true;
+let anyPerturbed = false;
+for (let i = 0; i < 124; i++) {
+  if (mutChild.brainWeights[i] < -5.0 || mutChild.brainWeights[i] > 5.0) allWithinBounds = false;
+  if (mutChild.brainWeights[i] !== defaultGenome.brainWeights[i]) anyPerturbed = true;
+}
+assert(allWithinBounds, 'All mutated synaptic weights clamped to [-5.0, 5.0]');
+assert(anyPerturbed, 'Synaptic mutation perturbs neural weights');
+assert(mutChild.chromatophore >= 0 && mutChild.chromatophore <= 1, 'Mutated chromatophore within [0, 1]');
+assert(mutChild.adhesion >= 0 && mutChild.adhesion <= 1, 'Mutated adhesion within [0, 1]');
+assert(mutChild.symbiosis >= 0 && mutChild.symbiosis <= 1, 'Mutated symbiosis within [0, 1]');
+assert(['neural', 'heuristic'].includes(mutChild.brainType), 'Mutated brainType valid');
+
+// 4. Crossover producing valid recombinant synaptic weights
+const parentA = new Genome({ brainType: 'neural' });
+const parentB = new Genome({ brainType: 'heuristic' });
+const crossChild = parentA.crossover(parentB);
+assert(crossChild.brainWeights instanceof Float32Array, 'Crossover child has Float32Array weights');
+assert(crossChild.brainWeights.length === 124, 'Crossover child has 124 weights');
+let crossWithinBounds = true;
+for (let i = 0; i < 124; i++) {
+  if (crossChild.brainWeights[i] < -5.0 || crossChild.brainWeights[i] > 5.0) crossWithinBounds = false;
+}
+assert(crossWithinBounds, 'Crossover synaptic weights within [-5.0, 5.0]');
+assert(['neural', 'heuristic'].includes(crossChild.brainType), 'Crossover child brainType inherited from parents');
+assert(crossChild.chromatophore >= 0 && crossChild.chromatophore <= 1, 'Crossover chromatophore in bounds');
+assert(crossChild.adhesion >= 0 && crossChild.adhesion <= 1, 'Crossover adhesion in bounds');
+assert(crossChild.symbiosis >= 0 && crossChild.symbiosis <= 1, 'Crossover symbiosis in bounds');
+
+// 5. Creature instantiating this.brain instanceof NeuralBrain
+const testCreature1 = new Creature(200, 200, defaultGenome);
+assert(testCreature1.brain instanceof NeuralBrain, 'Creature instantiates this.brain instanceof NeuralBrain');
+assert(testCreature1.brain.weights.length === 124, 'Creature brain has 124 weights');
+assert(testCreature1.brainType === defaultGenome.brainType, 'Creature brainType getter matches genome brainType');
+const asexualChild = testCreature1.reproduceAsexual();
+assert(asexualChild.brain instanceof NeuralBrain, 'Asexual offspring instantiates new NeuralBrain');
+assert(asexualChild.brain.weights !== testCreature1.brain.weights, 'Asexual offspring has independent brain weights');
+const sexualPartner = new Creature(210, 200, parentB);
+const sexualChild = testCreature1.reproduceSexual(sexualPartner);
+assert(sexualChild.brain instanceof NeuralBrain, 'Sexual offspring instantiates new NeuralBrain');
+assert(sexualChild.brain.weights !== testCreature1.brain.weights && sexualChild.brain.weights !== sexualPartner.brain.weights, 'Sexual offspring has independent recombinant brain weights');
+
+// 6. Genetic Distance & Synaptic Delta
+assertApprox(defaultGenome.distance(defaultGenome), 0.0, 1e-4, 'Distance between identical genomes is 0');
+assertApprox(defaultGenome.distance(mutChild), defaultGenome.geneticDistance(mutChild), 1e-6, 'distance() is alias for geneticDistance()');
+const gA = new Genome();
+const gB = gA.clone();
+assertApprox(gA.geneticDistance(gB), 0.0, 1e-4, 'Identical clone distance is 0');
+for (let i = 0; i < 124; i++) gB.brainWeights[i] += 2.0;
+const dSyn = gA.geneticDistance(gB);
+assert(dSyn > 0.0, 'Synaptic weight delta contributes to genetic distance');
+
+// 7. toJSON and fromJSON serialization
+const json = defaultGenome.toJSON();
+assert(Array.isArray(json.brainWeights), 'toJSON exports brainWeights as array');
+assert(json.brainWeights.length === 124, 'toJSON exports all 124 weights');
+assert(json.brainType === 'neural', 'toJSON exports brainType');
+assertApprox(json.chromatophore, 0.3, 1e-4, 'toJSON exports chromatophore');
+assertApprox(json.adhesion, 0.1, 1e-4, 'toJSON exports adhesion');
+assertApprox(json.symbiosis, 0.2, 1e-4, 'toJSON exports symbiosis');
+const serializedStr = JSON.stringify(json);
+const restoredGenome = Genome.fromJSON(JSON.parse(serializedStr));
+assert(restoredGenome.brainWeights instanceof Float32Array, 'fromJSON restores Float32Array brainWeights');
+assert(restoredGenome.brainWeights.length === 124, 'fromJSON restores 124 weights');
+assert(restoredGenome.brainType === 'neural', 'fromJSON restores brainType');
+assertApprox(restoredGenome.distance(defaultGenome), 0.0, 1e-4, 'Restored genome genetic distance to original is 0');
+
 console.log('--- Testing Piece 2: Creature Physics, Metabolism & AI ---');
 
 const creature = new Creature(500, 500, herbGenome, 100);

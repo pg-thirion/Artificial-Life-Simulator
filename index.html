@@ -1350,6 +1350,232 @@ function geneticColor(genome) {
 }
 
 
+/* --- src/neuralBrain.js --- */
+/**
+ * Artificial Life Simulator - Neural Brain & Perceptron Engine
+ * Zero-dependency feedforward perceptron: 10 inputs -> 8 hidden (tanh) -> 4 outputs.
+ * Total parameters: exactly 124 weights stored as Float32Array(124).
+ * Caches live activations for visualizer inspection and telemetry.
+ */
+
+
+
+const BRAIN_CONFIG = Object.freeze({
+  INPUT_SIZE: 10,
+  HIDDEN_SIZE: 8,
+  OUTPUT_SIZE: 4,
+  TOTAL_WEIGHTS: 124, // W1 (80) + B1 (8) + W2 (32) + B2 (4)
+  W1_OFFSET: 0,       // 0..79
+  B1_OFFSET: 80,      // 80..87
+  W2_OFFSET: 88,      // 88..119
+  B2_OFFSET: 120,     // 120..123
+  MUTATION_RATE: 0.06,
+  WEIGHT_MIN: -5.0,
+  WEIGHT_MAX: 5.0,
+  INIT_WEIGHT_MIN: -1.0,
+  INIT_WEIGHT_MAX: 1.0,
+  INPUT_LABELS: [
+    'nearestFoodDist',
+    'nearestFoodAngle',
+    'nearestFoodDangerSignal',
+    'nearestThreatDist',
+    'nearestThreatAngle',
+    'nearestMateDist',
+    'nearestMateAngle',
+    'energyRatio',
+    'biomeDragStress',
+    'solarIntensity'
+  ],
+  OUTPUT_LABELS: [
+    'steerAngleDelta',
+    'thrustMagnitude',
+    'courtshipDesire',
+    'aggressionImpulse'
+  ]
+});
+
+/**
+ * Standard numerically stable sigmoid helper clamped to [0, 1].
+ * @param {number} z 
+ * @returns {number}
+ */
+function sigmoid(z) {
+  if (z >= 0) {
+    return clamp(1.0 / (1.0 + Math.exp(-z)), 0.0, 1.0);
+  } else {
+    const ez = Math.exp(z);
+    return clamp(ez / (1.0 + ez), 0.0, 1.0);
+  }
+}
+
+class NeuralBrain {
+  /**
+   * @param {Float32Array|Array<number>|null} [weights=null] 124 parameter weights array or null for random.
+   */
+  constructor(weights = null) {
+    this.weights = new Float32Array(BRAIN_CONFIG.TOTAL_WEIGHTS);
+
+    if (weights && weights.length >= BRAIN_CONFIG.TOTAL_WEIGHTS) {
+      for (let i = 0; i < BRAIN_CONFIG.TOTAL_WEIGHTS; i++) {
+        this.weights[i] = clamp(weights[i], BRAIN_CONFIG.WEIGHT_MIN, BRAIN_CONFIG.WEIGHT_MAX);
+      }
+    } else {
+      const initial = NeuralBrain.randomWeights();
+      this.weights.set(initial);
+    }
+
+    this.activations = {
+      input: new Float32Array(BRAIN_CONFIG.INPUT_SIZE),
+      hidden: new Float32Array(BRAIN_CONFIG.HIDDEN_SIZE),
+      output: new Float32Array(BRAIN_CONFIG.OUTPUT_SIZE)
+    };
+  }
+
+  /**
+   * Evaluates the feedforward network.
+   * Input: 10 sensory features.
+   * Output: 4 motor actions:
+   *  - output[0]: steerAngleDelta in [-PI, PI]
+   *  - output[1]: thrustMagnitude in [0, 1]
+   *  - output[2]: courtshipDesire in [0, 1]
+   *  - output[3]: aggressionImpulse in [0, 1]
+   * Caches activations in this.activations.
+   *
+   * @param {Array<number>|Float32Array} inputs 
+   * @returns {Float32Array} Output activations (length 4)
+   */
+  forward(inputs) {
+    const inAct = this.activations.input;
+    const hidAct = this.activations.hidden;
+    const outAct = this.activations.output;
+    const w = this.weights;
+
+    // Cache sensory inputs
+    const numIn = BRAIN_CONFIG.INPUT_SIZE;
+    for (let i = 0; i < numIn; i++) {
+      inAct[i] = Number.isFinite(inputs[i]) ? inputs[i] : 0.0;
+    }
+
+    // Layer 1: Inputs -> Hidden (tanh)
+    // W1: 8 rows (hidden), 10 cols (inputs). Offset: 0..79
+    // B1: 8 biases. Offset: 80..87
+    const numHid = BRAIN_CONFIG.HIDDEN_SIZE;
+    const b1Offset = BRAIN_CONFIG.B1_OFFSET;
+
+    for (let h = 0; h < numHid; h++) {
+      let sum = w[b1Offset + h];
+      const rowOffset = h * numIn;
+      for (let i = 0; i < numIn; i++) {
+        sum += inAct[i] * w[rowOffset + i];
+      }
+      hidAct[h] = Math.tanh(sum);
+    }
+
+    // Layer 2: Hidden -> Output
+    // W2: 4 rows (outputs), 8 cols (hidden). Offset: 88..119
+    // B2: 4 biases. Offset: 120..123
+    const numOut = BRAIN_CONFIG.OUTPUT_SIZE;
+    const w2Offset = BRAIN_CONFIG.W2_OFFSET;
+    const b2Offset = BRAIN_CONFIG.B2_OFFSET;
+
+    for (let o = 0; o < numOut; o++) {
+      let sum = w[b2Offset + o];
+      const rowOffset = w2Offset + o * numHid;
+      for (let h = 0; h < numHid; h++) {
+        sum += hidAct[h] * w[rowOffset + h];
+      }
+
+      if (o === 0) {
+        // Output 0: Turning impulse in [-PI, PI]
+        outAct[0] = clamp(Math.tanh(sum) * Math.PI, -Math.PI, Math.PI);
+      } else {
+        // Output 1..3: Action drives in [0, 1]
+        outAct[o] = sigmoid(sum);
+      }
+    }
+
+    return outAct;
+  }
+
+  /**
+   * Generates a new Float32Array(124) with uniform random weights in [-1.0, 1.0].
+   * @returns {Float32Array}
+   */
+  static randomWeights() {
+    const weights = new Float32Array(BRAIN_CONFIG.TOTAL_WEIGHTS);
+    for (let i = 0; i < BRAIN_CONFIG.TOTAL_WEIGHTS; i++) {
+      weights[i] = randomFloat(BRAIN_CONFIG.INIT_WEIGHT_MIN, BRAIN_CONFIG.INIT_WEIGHT_MAX);
+    }
+    return weights;
+  }
+
+  /**
+   * Mutates synaptic weights using Gaussian noise with 5% chance of sign flip.
+   * Clamps all weights to [-5.0, 5.0].
+   * Does not mutate original weights array.
+   *
+   * @param {Float32Array|Array<number>} weights 
+   * @param {number} [mutationRate=0.06] Probability of mutation per synapse
+   * @param {number} [stdDev=0.2] Gaussian noise standard deviation
+   * @returns {Float32Array} New mutated weights array
+   */
+  static mutateWeights(weights, mutationRate = BRAIN_CONFIG.MUTATION_RATE, stdDev = 0.2) {
+    const total = BRAIN_CONFIG.TOTAL_WEIGHTS;
+    const child = new Float32Array(total);
+
+    for (let i = 0; i < total; i++) {
+      let val = weights[i];
+
+      if (Math.random() < mutationRate) {
+        // Perturb with Gaussian noise
+        val += randomGaussian(0, stdDev);
+
+        // 5% chance of structural macro-mutation (sign flip)
+        if (Math.random() < 0.05) {
+          val = -val;
+        }
+      }
+
+      child[i] = clamp(val, BRAIN_CONFIG.WEIGHT_MIN, BRAIN_CONFIG.WEIGHT_MAX);
+    }
+
+    return child;
+  }
+
+  /**
+   * Sexual crossover recombines two parent weight genomes 50/50 with occasional arithmetic blending.
+   * Clamps all weights to [-5.0, 5.0].
+   *
+   * @param {Float32Array|Array<number>} wA Parent A weights
+   * @param {Float32Array|Array<number>} wB Parent B weights
+   * @returns {Float32Array} New recombinant child weights
+   */
+  static crossoverWeights(wA, wB) {
+    const total = BRAIN_CONFIG.TOTAL_WEIGHTS;
+    const child = new Float32Array(total);
+
+    for (let i = 0; i < total; i++) {
+      const r = Math.random();
+      let val;
+
+      if (r < 0.45) {
+        val = wA[i];
+      } else if (r < 0.90) {
+        val = wB[i];
+      } else {
+        // 10% chance of arithmetic blend
+        const blend = Math.random();
+        val = wA[i] * blend + wB[i] * (1.0 - blend);
+      }
+
+      child[i] = clamp(val, BRAIN_CONFIG.WEIGHT_MIN, BRAIN_CONFIG.WEIGHT_MAX);
+    }
+
+    return child;
+  }
+}
+
+
 /* --- src/spatialGrid.js --- */
 /**
  * Artificial Life Simulator - Spatial Hash Grid
@@ -2139,6 +2365,7 @@ class FoodManager {
 
 
 
+
 let NEXT_SPECIES_COUNTER = 1;
 
 const GENE_BOUNDS = {
@@ -2153,7 +2380,10 @@ const GENE_BOUNDS = {
   efficiency: { min: 0.6, max: 1.4, default: 1.0 },
   flocking: { min: 0.0, max: 1.0, default: 0.5 },
   armor: { min: 0.0, max: 1.0, default: 0.2 },
-  nocturnal: { min: 0.0, max: 1.0, default: 0.2 }
+  nocturnal: { min: 0.0, max: 1.0, default: 0.2 },
+  chromatophore: { min: 0.0, max: 1.0, default: 0.3 },
+  adhesion: { min: 0.0, max: 1.0, default: 0.1 },
+  symbiosis: { min: 0.0, max: 1.0, default: 0.2 }
 };
 
 class Genome {
@@ -2173,6 +2403,16 @@ class Genome {
     this.flocking = clamp(traits.flocking ?? GENE_BOUNDS.flocking.default, GENE_BOUNDS.flocking.min, GENE_BOUNDS.flocking.max);
     this.armor = clamp(traits.armor ?? GENE_BOUNDS.armor.default, GENE_BOUNDS.armor.min, GENE_BOUNDS.armor.max);
     this.nocturnal = clamp(traits.nocturnal ?? GENE_BOUNDS.nocturnal.default, GENE_BOUNDS.nocturnal.min, GENE_BOUNDS.nocturnal.max);
+    this.chromatophore = clamp(traits.chromatophore ?? GENE_BOUNDS.chromatophore.default, GENE_BOUNDS.chromatophore.min, GENE_BOUNDS.chromatophore.max);
+    this.adhesion = clamp(traits.adhesion ?? GENE_BOUNDS.adhesion.default, GENE_BOUNDS.adhesion.min, GENE_BOUNDS.adhesion.max);
+    this.symbiosis = clamp(traits.symbiosis ?? GENE_BOUNDS.symbiosis.default, GENE_BOUNDS.symbiosis.min, GENE_BOUNDS.symbiosis.max);
+
+    this.brainType = traits.brainType === 'heuristic' ? 'heuristic' : 'neural';
+    if (traits.brainWeights && traits.brainWeights.length >= 124) {
+      this.brainWeights = new Float32Array(traits.brainWeights);
+    } else {
+      this.brainWeights = NeuralBrain.randomWeights();
+    }
 
     this.generation = traits.generation ?? 1;
     this.speciesId = traits.speciesId ?? `sp_${NEXT_SPECIES_COUNTER++}`;
@@ -2332,6 +2572,31 @@ class Genome {
       GENE_BOUNDS.nocturnal.max
     );
 
+    const newChromatophore = clamp(
+      randomGaussian(this.chromatophore, rate * 0.5),
+      GENE_BOUNDS.chromatophore.min,
+      GENE_BOUNDS.chromatophore.max
+    );
+
+    const newAdhesion = clamp(
+      randomGaussian(this.adhesion, rate * 0.5),
+      GENE_BOUNDS.adhesion.min,
+      GENE_BOUNDS.adhesion.max
+    );
+
+    const newSymbiosis = clamp(
+      randomGaussian(this.symbiosis, rate * 0.5),
+      GENE_BOUNDS.symbiosis.min,
+      GENE_BOUNDS.symbiosis.max
+    );
+
+    const newBrainWeights = NeuralBrain.mutateWeights(this.brainWeights, rate);
+
+    let newBrainType = this.brainType;
+    if (Math.random() < 0.02) {
+      newBrainType = newBrainType === 'neural' ? 'heuristic' : 'neural';
+    }
+
     const child = new Genome({
       speed: newSpeed,
       sense: newSense,
@@ -2345,6 +2610,11 @@ class Genome {
       flocking: newFlocking,
       armor: newArmor,
       nocturnal: newNocturnal,
+      chromatophore: newChromatophore,
+      adhesion: newAdhesion,
+      symbiosis: newSymbiosis,
+      brainType: newBrainType,
+      brainWeights: newBrainWeights,
       generation: this.generation + 1,
       speciesId: this.speciesId
     });
@@ -2371,6 +2641,9 @@ class Genome {
       return lerp(this[gene], partner[gene], randomFloat(0.2, 0.8));
     };
 
+    const childWeights = NeuralBrain.crossoverWeights(this.brainWeights, partner.brainWeights);
+    const childBrainType = Math.random() < 0.5 ? this.brainType : partner.brainType;
+
     const offspring = new Genome({
       speed: pick('speed'),
       sense: pick('sense'),
@@ -2384,6 +2657,11 @@ class Genome {
       flocking: pick('flocking'),
       armor: pick('armor'),
       nocturnal: pick('nocturnal'),
+      chromatophore: pick('chromatophore'),
+      adhesion: pick('adhesion'),
+      symbiosis: pick('symbiosis'),
+      brainType: childBrainType,
+      brainWeights: childWeights,
       generation: Math.max(this.generation, partner.generation) + 1,
       speciesId: this.speciesId
     });
@@ -2414,17 +2692,34 @@ class Genome {
     const dArmor = (this.armor ?? 0.2) - (other.armor ?? 0.2);
     const dNocturnal = (this.nocturnal ?? 0.2) - (other.nocturnal ?? 0.2);
     const dMeta = (this.metabolismRate - other.metabolismRate) / (GENE_BOUNDS.metabolismRate.max - GENE_BOUNDS.metabolismRate.min);
+    const dChromatophore = (this.chromatophore ?? GENE_BOUNDS.chromatophore.default) - (other.chromatophore ?? GENE_BOUNDS.chromatophore.default);
+    const dAdhesion = (this.adhesion ?? GENE_BOUNDS.adhesion.default) - (other.adhesion ?? GENE_BOUNDS.adhesion.default);
+    const dSymbiosis = (this.symbiosis ?? GENE_BOUNDS.symbiosis.default) - (other.symbiosis ?? GENE_BOUNDS.symbiosis.default);
+
+    let dSynaptic = 0;
+    if (this.brainWeights && other.brainWeights) {
+      let sumDiff = 0;
+      const len = Math.min(this.brainWeights.length, other.brainWeights.length);
+      for (let i = 0; i < len; i++) {
+        sumDiff += Math.abs(this.brainWeights[i] - other.brainWeights[i]);
+      }
+      dSynaptic = len > 0 ? (sumDiff / (len * 10.0)) : 0;
+    }
 
     // Weights: Diet and Size have highest evolutionary weight in morphological divergence
-    const wDiet = 0.30;
-    const wSize = 0.19;
-    const wSpeed = 0.15;
-    const wSense = 0.11;
-    const wCamouflage = 0.07;
-    const wArmor = 0.07;
-    const wNocturnal = 0.05;
+    const wDiet = 0.26;
+    const wSize = 0.16;
+    const wSpeed = 0.13;
+    const wSense = 0.09;
+    const wCamouflage = 0.05;
+    const wArmor = 0.05;
+    const wNocturnal = 0.04;
     const wBravery = 0.04;
     const wMeta = 0.02;
+    const wChromatophore = 0.04;
+    const wAdhesion = 0.04;
+    const wSymbiosis = 0.04;
+    const wSynaptic = 0.04;
 
     const distSq = 
       wDiet * (dDiet * dDiet) +
@@ -2435,9 +2730,22 @@ class Genome {
       wArmor * (dArmor * dArmor) +
       wNocturnal * (dNocturnal * dNocturnal) +
       wBravery * (dBravery * dBravery) +
-      wMeta * (dMeta * dMeta);
+      wMeta * (dMeta * dMeta) +
+      wChromatophore * (dChromatophore * dChromatophore) +
+      wAdhesion * (dAdhesion * dAdhesion) +
+      wSymbiosis * (dSymbiosis * dSymbiosis) +
+      wSynaptic * (dSynaptic * dSynaptic);
 
     return Math.sqrt(distSq);
+  }
+
+  /**
+   * Alias for geneticDistance.
+   * @param {Genome} other 
+   * @returns {number}
+   */
+  distance(other) {
+    return this.geneticDistance(other);
   }
 
   /**
@@ -2458,6 +2766,11 @@ class Genome {
       flocking: this.flocking,
       armor: this.armor,
       nocturnal: this.nocturnal,
+      chromatophore: this.chromatophore,
+      adhesion: this.adhesion,
+      symbiosis: this.symbiosis,
+      brainType: this.brainType,
+      brainWeights: new Float32Array(this.brainWeights),
       generation: this.generation,
       speciesId: this.speciesId
     });
@@ -2481,6 +2794,11 @@ class Genome {
       flocking: this.flocking,
       armor: this.armor,
       nocturnal: this.nocturnal,
+      chromatophore: this.chromatophore,
+      adhesion: this.adhesion,
+      symbiosis: this.symbiosis,
+      brainType: this.brainType,
+      brainWeights: Array.from(this.brainWeights),
       generation: this.generation,
       speciesId: this.speciesId
     };
@@ -2507,6 +2825,7 @@ class Genome {
 
 
 
+
 let NEXT_CREATURE_ID = 1;
 
 class Creature {
@@ -2521,6 +2840,9 @@ class Creature {
 
     // Genetics
     this.genome = genome ? genome.clone() : Genome.random('herbivore');
+
+    // Neural Perceptron Brain
+    this.brain = new NeuralBrain(this.genome.brainWeights);
 
     // Organism Physics
     this.position = new Vector2D(x, y);
@@ -2578,6 +2900,18 @@ class Creature {
     this.isHighlighted = false;
     this.isPossessed = false;
     this.playerInputVector = new Vector2D(0, 0);
+  }
+
+  /**
+   * Brain architecture type ('neural' | 'heuristic').
+   * @returns {'neural'|'heuristic'}
+   */
+  get brainType() {
+    return this.genome.brainType;
+  }
+
+  set brainType(val) {
+    this.genome.brainType = val;
   }
 
   /**
@@ -3080,65 +3414,84 @@ class Creature {
       const dSq = this.position.distSq(partner.position);
       const contactDist = this.radius + partner.radius + 10;
       if (dSq <= contactDist * contactDist && partner.matingCooldown <= 0 && this.matingCooldown <= 0) {
-        const childGenome = this.genome.crossover(partner.genome);
-        const splitEnergy = (this.energy * 0.28) + (partner.energy * 0.28);
-        this.energy = Math.max(20, this.energy * 0.72);
-        partner.energy = Math.max(20, partner.energy * 0.72);
-        this.matingCooldown = 7.0;
-        partner.matingCooldown = 7.0;
-        this.offspringCount++;
-        partner.offspringCount++;
-        this.mitosisTimer = 0.5;
-        partner.mitosisTimer = 0.5;
-
-        const childX = (this.position.x + partner.position.x) / 2;
-        const childY = (this.position.y + partner.position.y) / 2;
-        const child = new Creature(childX, childY, childGenome, splitEnergy);
-        child.parentAId = this.id;
-        child.parentBId = partner.id;
-        child.reproductionType = 'sexual';
-        child.mitosisTimer = 0.5;
-        this.courtshipTarget = null;
-        partner.courtshipTarget = null;
-
-        if (env && env.addPheromone) {
-          env.addPheromone(childX, childY, 'mating', 1.0, 5.0);
-        }
-        if (env && env.addFloatingText) {
-          env.addFloatingText(childX, childY - 14, '💕 MATED!', '#ec4899');
-        }
-        return child;
+        return this.reproduceSexual(partner, env);
       }
     }
 
     // 7. Reproduction (Asexual Budding with Genetic Drift)
     // Creature splits when well-fed, passing half its energy minus metabolic birth tax
     if (this.energy >= this.reproductionThreshold && this.age > 4.0) {
-      const mutMult = env?.mutationMultiplier ?? 1.0;
-      const childGenome = this.genome.mutate(mutMult);
-
-      // Energy split: each retains ~42% of parent energy (16% tax for birth metabolism)
-      const childEnergy = (this.energy - this.birthEnergyTax) * 0.48;
-      this.energy = (this.energy - this.birthEnergyTax) * 0.48;
-      this.offspringCount++;
-
-      // Trigger visual mitosis squeeze/pinch animation
-      this.mitosisTimer = 0.45;
-
-      // Spawn child slightly behind parent
-      const spawnOffset = Vector2D.fromAngle(this.heading + Math.PI + randomFloat(-0.6, 0.6), this.radius * 2.2);
-      const childX = this.position.x + spawnOffset.x;
-      const childY = this.position.y + spawnOffset.y;
-
-      const child = new Creature(childX, childY, childGenome, childEnergy);
-      child.parentAId = this.id;
-      child.parentBId = null;
-      child.reproductionType = 'asexual';
-      child.mitosisTimer = 0.45;
-      return child;
+      return this.reproduceAsexual(env);
     }
 
     return null;
+  }
+
+  /**
+   * Sexual reproduction encounter with a mate: performs crossover and instantiates offspring.
+   * @param {Creature} partner 
+   * @param {Object} [env=null] 
+   * @returns {Creature} Offspring
+   */
+  reproduceSexual(partner, env = null) {
+    const childGenome = this.genome.crossover(partner.genome);
+    const splitEnergy = (this.energy * 0.28) + (partner.energy * 0.28);
+    this.energy = Math.max(20, this.energy * 0.72);
+    partner.energy = Math.max(20, partner.energy * 0.72);
+    this.matingCooldown = 7.0;
+    partner.matingCooldown = 7.0;
+    this.offspringCount++;
+    partner.offspringCount++;
+    this.mitosisTimer = 0.5;
+    partner.mitosisTimer = 0.5;
+
+    const childX = (this.position.x + partner.position.x) / 2;
+    const childY = (this.position.y + partner.position.y) / 2;
+    const child = new Creature(childX, childY, childGenome, splitEnergy);
+    child.parentAId = this.id;
+    child.parentBId = partner.id;
+    child.reproductionType = 'sexual';
+    child.mitosisTimer = 0.5;
+    this.courtshipTarget = null;
+    partner.courtshipTarget = null;
+
+    if (env && env.addPheromone) {
+      env.addPheromone(childX, childY, 'mating', 1.0, 5.0);
+    }
+    if (env && env.addFloatingText) {
+      env.addFloatingText(childX, childY - 14, '💕 MATED!', '#ec4899');
+    }
+    return child;
+  }
+
+  /**
+   * Asexual budding reproduction: mutates genome and instantiates offspring.
+   * @param {Object} [env=null] 
+   * @returns {Creature} Offspring
+   */
+  reproduceAsexual(env = null) {
+    const mutMult = env?.mutationMultiplier ?? 1.0;
+    const childGenome = this.genome.mutate(mutMult);
+
+    // Energy split: each retains ~42% of parent energy (16% tax for birth metabolism)
+    const childEnergy = (this.energy - this.birthEnergyTax) * 0.48;
+    this.energy = (this.energy - this.birthEnergyTax) * 0.48;
+    this.offspringCount++;
+
+    // Trigger visual mitosis squeeze/pinch animation
+    this.mitosisTimer = 0.45;
+
+    // Spawn child slightly behind parent
+    const spawnOffset = Vector2D.fromAngle(this.heading + Math.PI + randomFloat(-0.6, 0.6), this.radius * 2.2);
+    const childX = this.position.x + spawnOffset.x;
+    const childY = this.position.y + spawnOffset.y;
+
+    const child = new Creature(childX, childY, childGenome, childEnergy);
+    child.parentAId = this.id;
+    child.parentBId = null;
+    child.reproductionType = 'asexual';
+    child.mitosisTimer = 0.45;
+    return child;
   }
 
   /**

@@ -16,6 +16,7 @@ function stripImportsExports(code) {
 
 const moduleFiles = [
   'src/math.js',
+  'src/neuralBrain.js',
   'src/spatialGrid.js',
   'src/food.js',
   'src/genome.js',

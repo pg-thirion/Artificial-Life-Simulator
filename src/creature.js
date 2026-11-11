@@ -6,6 +6,7 @@
 
 import { Vector2D, randomFloat, randomGaussian, clamp, lerp } from './math.js';
 import { Genome } from './genome.js';
+import { NeuralBrain } from './neuralBrain.js';
 
 let NEXT_CREATURE_ID = 1;
 
@@ -21,6 +22,9 @@ export class Creature {
 
     // Genetics
     this.genome = genome ? genome.clone() : Genome.random('herbivore');
+
+    // Neural Perceptron Brain
+    this.brain = new NeuralBrain(this.genome.brainWeights);
 
     // Organism Physics
     this.position = new Vector2D(x, y);
@@ -78,6 +82,18 @@ export class Creature {
     this.isHighlighted = false;
     this.isPossessed = false;
     this.playerInputVector = new Vector2D(0, 0);
+  }
+
+  /**
+   * Brain architecture type ('neural' | 'heuristic').
+   * @returns {'neural'|'heuristic'}
+   */
+  get brainType() {
+    return this.genome.brainType;
+  }
+
+  set brainType(val) {
+    this.genome.brainType = val;
   }
 
   /**
@@ -580,65 +596,84 @@ export class Creature {
       const dSq = this.position.distSq(partner.position);
       const contactDist = this.radius + partner.radius + 10;
       if (dSq <= contactDist * contactDist && partner.matingCooldown <= 0 && this.matingCooldown <= 0) {
-        const childGenome = this.genome.crossover(partner.genome);
-        const splitEnergy = (this.energy * 0.28) + (partner.energy * 0.28);
-        this.energy = Math.max(20, this.energy * 0.72);
-        partner.energy = Math.max(20, partner.energy * 0.72);
-        this.matingCooldown = 7.0;
-        partner.matingCooldown = 7.0;
-        this.offspringCount++;
-        partner.offspringCount++;
-        this.mitosisTimer = 0.5;
-        partner.mitosisTimer = 0.5;
-
-        const childX = (this.position.x + partner.position.x) / 2;
-        const childY = (this.position.y + partner.position.y) / 2;
-        const child = new Creature(childX, childY, childGenome, splitEnergy);
-        child.parentAId = this.id;
-        child.parentBId = partner.id;
-        child.reproductionType = 'sexual';
-        child.mitosisTimer = 0.5;
-        this.courtshipTarget = null;
-        partner.courtshipTarget = null;
-
-        if (env && env.addPheromone) {
-          env.addPheromone(childX, childY, 'mating', 1.0, 5.0);
-        }
-        if (env && env.addFloatingText) {
-          env.addFloatingText(childX, childY - 14, '💕 MATED!', '#ec4899');
-        }
-        return child;
+        return this.reproduceSexual(partner, env);
       }
     }
 
     // 7. Reproduction (Asexual Budding with Genetic Drift)
     // Creature splits when well-fed, passing half its energy minus metabolic birth tax
     if (this.energy >= this.reproductionThreshold && this.age > 4.0) {
-      const mutMult = env?.mutationMultiplier ?? 1.0;
-      const childGenome = this.genome.mutate(mutMult);
-
-      // Energy split: each retains ~42% of parent energy (16% tax for birth metabolism)
-      const childEnergy = (this.energy - this.birthEnergyTax) * 0.48;
-      this.energy = (this.energy - this.birthEnergyTax) * 0.48;
-      this.offspringCount++;
-
-      // Trigger visual mitosis squeeze/pinch animation
-      this.mitosisTimer = 0.45;
-
-      // Spawn child slightly behind parent
-      const spawnOffset = Vector2D.fromAngle(this.heading + Math.PI + randomFloat(-0.6, 0.6), this.radius * 2.2);
-      const childX = this.position.x + spawnOffset.x;
-      const childY = this.position.y + spawnOffset.y;
-
-      const child = new Creature(childX, childY, childGenome, childEnergy);
-      child.parentAId = this.id;
-      child.parentBId = null;
-      child.reproductionType = 'asexual';
-      child.mitosisTimer = 0.45;
-      return child;
+      return this.reproduceAsexual(env);
     }
 
     return null;
+  }
+
+  /**
+   * Sexual reproduction encounter with a mate: performs crossover and instantiates offspring.
+   * @param {Creature} partner 
+   * @param {Object} [env=null] 
+   * @returns {Creature} Offspring
+   */
+  reproduceSexual(partner, env = null) {
+    const childGenome = this.genome.crossover(partner.genome);
+    const splitEnergy = (this.energy * 0.28) + (partner.energy * 0.28);
+    this.energy = Math.max(20, this.energy * 0.72);
+    partner.energy = Math.max(20, partner.energy * 0.72);
+    this.matingCooldown = 7.0;
+    partner.matingCooldown = 7.0;
+    this.offspringCount++;
+    partner.offspringCount++;
+    this.mitosisTimer = 0.5;
+    partner.mitosisTimer = 0.5;
+
+    const childX = (this.position.x + partner.position.x) / 2;
+    const childY = (this.position.y + partner.position.y) / 2;
+    const child = new Creature(childX, childY, childGenome, splitEnergy);
+    child.parentAId = this.id;
+    child.parentBId = partner.id;
+    child.reproductionType = 'sexual';
+    child.mitosisTimer = 0.5;
+    this.courtshipTarget = null;
+    partner.courtshipTarget = null;
+
+    if (env && env.addPheromone) {
+      env.addPheromone(childX, childY, 'mating', 1.0, 5.0);
+    }
+    if (env && env.addFloatingText) {
+      env.addFloatingText(childX, childY - 14, '💕 MATED!', '#ec4899');
+    }
+    return child;
+  }
+
+  /**
+   * Asexual budding reproduction: mutates genome and instantiates offspring.
+   * @param {Object} [env=null] 
+   * @returns {Creature} Offspring
+   */
+  reproduceAsexual(env = null) {
+    const mutMult = env?.mutationMultiplier ?? 1.0;
+    const childGenome = this.genome.mutate(mutMult);
+
+    // Energy split: each retains ~42% of parent energy (16% tax for birth metabolism)
+    const childEnergy = (this.energy - this.birthEnergyTax) * 0.48;
+    this.energy = (this.energy - this.birthEnergyTax) * 0.48;
+    this.offspringCount++;
+
+    // Trigger visual mitosis squeeze/pinch animation
+    this.mitosisTimer = 0.45;
+
+    // Spawn child slightly behind parent
+    const spawnOffset = Vector2D.fromAngle(this.heading + Math.PI + randomFloat(-0.6, 0.6), this.radius * 2.2);
+    const childX = this.position.x + spawnOffset.x;
+    const childY = this.position.y + spawnOffset.y;
+
+    const child = new Creature(childX, childY, childGenome, childEnergy);
+    child.parentAId = this.id;
+    child.parentBId = null;
+    child.reproductionType = 'asexual';
+    child.mitosisTimer = 0.45;
+    return child;
   }
 
   /**
