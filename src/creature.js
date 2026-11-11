@@ -117,6 +117,11 @@ export class Creature {
     this.lastNeuralInputs = null;
     this.lastNeuralOutputs = null;
 
+    // Parasite and Symbiosis Dynamics
+    this.attachedParasites = [];
+    this.hostCreature = null;
+    this.parasiteOffsetAngle = 0;
+
     // Dynamic chromatophore phenotypic coloration
     const initialRgb = getInitialGenomeRgb(this.genome);
     this._baseGenomeRgb = { r: initialRgb.r, g: initialRgb.g, b: initialRgb.b };
@@ -170,6 +175,26 @@ export class Creature {
     const mimic = (camouflage > 0.65) ? clamp((camouflage - 0.65) / 0.35, 0, 1) : 0;
 
     return clamp(Math.max(genuine, mimic), 0, 1);
+  }
+
+  /**
+   * Whether this organism exhibits parasitic morphology and behavioral phenotype.
+   * symbiosis < 0.25, diet > 0.45, size < 7.0
+   * @returns {boolean}
+   */
+  get isParasite() {
+    return (this.genome?.symbiosis ?? 0.2) < 0.25 &&
+      (this.genome?.diet ?? 0) > 0.45 &&
+      (this.genome?.size ?? 8) < 7.0;
+  }
+
+  /**
+   * Whether this organism is a mutualist cleaner fish.
+   * symbiosis >= 0.6
+   * @returns {boolean}
+   */
+  get isCleaner() {
+    return (this.genome?.symbiosis ?? 0.2) >= 0.6;
   }
 
   /**
@@ -373,8 +398,11 @@ export class Creature {
     }
 
     if (this.genome.diet >= 0.42 && safeEnv.creatureGrid) {
+      const isStarving = this.energy < this.maxEnergy * 0.25;
       const preyCandidates = safeEnv.creatureGrid.queryRadius(this.position.x, this.position.y, sense, (c) => {
         if (c === this || !c.isAlive) return false;
+        // Cleaners (symbiosis >= 0.6) are immune to predators unless predator is starving
+        if ((c.genome?.symbiosis ?? 0) >= 0.6 && !isStarving) return false;
         const camo = c.genome?.camouflage ?? 0.25;
         const d = this.position.dist(c.position);
         const maxDetectDist = sense * (1.0 - camo * 0.60);
@@ -417,6 +445,7 @@ export class Creature {
 
     if (safeEnv.creatureGrid) {
       const threatCandidates = safeEnv.creatureGrid.queryRadius(this.position.x, this.position.y, sense, (c) => {
+        if (this.isParasite && (c.genome?.size ?? 0) > this.genome.size * 1.35) return false;
         return c !== this && c.isAlive && c.genome?.diet > 0.45 && c.genome?.size > this.genome.size * 1.12;
       });
       for (let i = 0; i < threatCandidates.length; i++) {
@@ -570,6 +599,61 @@ export class Creature {
       return { action: 'possessed', target: null };
     }
 
+    // Attached parasites do not steer autonomously
+    if (this.hostCreature) {
+      this.state = 'latched';
+      this.currentIntention = `Siphoning host [${this.hostCreature.genome?.speciesId ?? ''}]`;
+      return { action: 'latched', target: this.hostCreature };
+    }
+
+    // Cleaner mutualist: seek host with attached parasites
+    if (this.isCleaner && env && env.creatureGrid) {
+      const infestedCandidates = env.creatureGrid.queryRadius(this.position.x, this.position.y, this.genome.sense, (c) => {
+        return c !== this && c.isAlive && c.attachedParasites && c.attachedParasites.length > 0;
+      });
+      if (infestedCandidates.length > 0) {
+        let bestHost = infestedCandidates[0];
+        let bestDistSq = this.position.distSq(bestHost.position);
+        for (let i = 1; i < infestedCandidates.length; i++) {
+          const dSq = this.position.distSq(infestedCandidates[i].position);
+          if (dSq < bestDistSq) {
+            bestDistSq = dSq;
+            bestHost = infestedCandidates[i];
+          }
+        }
+        this.currentTarget = bestHost;
+        this.state = 'foraging';
+        this.currentIntention = `Grooming host [${bestHost.genome.speciesId}]`;
+        const seekForce = this.seek(bestHost.position, 16);
+        this.applyForce(seekForce.mult(1.2));
+        return { action: 'seek_grooming', target: bestHost };
+      }
+    }
+
+    // Parasite: seek large host
+    if (this.isParasite && !this.hostCreature && env && env.creatureGrid) {
+      const hostCandidates = env.creatureGrid.queryRadius(this.position.x, this.position.y, this.genome.sense, (c) => {
+        return c !== this && c.isAlive && (c.genome?.size ?? 0) > this.genome.size * 1.35;
+      });
+      if (hostCandidates.length > 0) {
+        let bestHost = hostCandidates[0];
+        let bestDistSq = this.position.distSq(bestHost.position);
+        for (let i = 1; i < hostCandidates.length; i++) {
+          const dSq = this.position.distSq(hostCandidates[i].position);
+          if (dSq < bestDistSq) {
+            bestDistSq = dSq;
+            bestHost = hostCandidates[i];
+          }
+        }
+        this.currentTarget = bestHost;
+        this.state = 'hunting';
+        this.currentIntention = `Stalking host [${bestHost.genome.speciesId}]`;
+        const seekForce = this.seek(bestHost.position, 16);
+        this.applyForce(seekForce.mult(1.2));
+        return { action: 'seek_host', target: bestHost };
+      }
+    }
+
     // Neural Brain Autonomous Steering
     if (this.brainType === 'neural') {
       return this.evaluateNeuralBehavior(env);
@@ -597,6 +681,7 @@ export class Creature {
     // Other creatures with carnivore/omnivore diet that are larger and genetically different
     if (env.creatureGrid) {
       const candidates = env.creatureGrid.queryRadius(this.position.x, this.position.y, sense, (c) => {
+        if (this.isParasite && (c.genome?.size ?? 0) > this.genome.size * 1.35) return false;
         return c !== this && c.isAlive && c.genome.diet > 0.45 && c.genome.size > this.genome.size * 1.12;
       });
 
@@ -627,8 +712,11 @@ export class Creature {
 
     // 2. Scan for Prey (Carnivores and aggressive Omnivores)
     if (diet >= 0.42 && env.creatureGrid) {
+      const isStarving = this.energy < this.maxEnergy * 0.25;
       const preyCandidates = env.creatureGrid.queryRadius(this.position.x, this.position.y, sense, (c) => {
         if (c === this || !c.isAlive) return false;
+        // Cleaners (symbiosis >= 0.6) are immune to predators unless predator is starving
+        if ((c.genome?.symbiosis ?? 0) >= 0.6 && !isStarving) return false;
         // Camouflage reduces effective perception range
         const camo = c.genome.camouflage ?? 0.25;
         const dist = this.position.dist(c.position);
@@ -746,15 +834,65 @@ export class Creature {
    * @returns {Creature|null} Child creature if reproduction occurred this frame
    */
   update(dt, env) {
-    if (!this.isAlive) return null;
+    if (!this.isAlive) {
+      this.onDeath();
+      return null;
+    }
 
     this.age += dt;
 
     // Check natural death by old age
     if (this.age >= this.lifespan) {
-      this.isAlive = false;
-      this.causeOfDeath = 'old_age';
+      this.die('old_age');
       return null;
+    }
+
+    // Parasite latching physics and energy siphoning
+    if (this.hostCreature) {
+      if (!this.hostCreature.isAlive) {
+        this.detachFromHost();
+      } else {
+        // Coordinate attachment position
+        const r = this.hostCreature.radius + this.radius * 0.5;
+        const angle = this.hostCreature.heading + this.parasiteOffsetAngle;
+        this.position.x = this.hostCreature.position.x + Math.cos(angle) * r;
+        this.position.y = this.hostCreature.position.y + Math.sin(angle) * r;
+        this.velocity.set(this.hostCreature.velocity.x, this.hostCreature.velocity.y);
+
+        // Siphon energy
+        const drain = 2.0 * dt;
+        const siphoned = Math.min(this.hostCreature.energy, drain);
+        this.hostCreature.energy -= siphoned;
+        this.energy = Math.min(this.maxEnergy, this.energy + siphoned * 0.8);
+
+        // Attached parasite skips autonomous steering locomotion
+        this.state = 'latched';
+        this.currentIntention = `Siphoning host [${this.hostCreature.genome?.speciesId ?? ''}]`;
+        const currentSpeed = this.velocity.mag();
+        this.distanceTraveled += currentSpeed * dt * 60.0;
+        this.heading = this.hostCreature.heading;
+        this.tailWiggle += dt * (this.tailWiggleSpeed + currentSpeed * 2.5);
+
+        // Primer metabolic cost while latched
+        const kineticMultiplier = env?.kineticMultiplier ?? 1.0;
+        const burnRate = this.calculateMetabolicCost(currentSpeed, false, kineticMultiplier);
+        this.energy -= burnRate * dt;
+        if (this.energy <= 0) {
+          this.energy = 0;
+          this.die('starvation');
+          return null;
+        }
+
+        if (this.mitosisTimer > 0) this.mitosisTimer -= dt;
+        if (this.matingCooldown > 0) this.matingCooldown -= dt;
+
+        // Asexual budding if energy exceeds threshold
+        if (this.energy >= this.reproductionThreshold && this.age > 4.0) {
+          return this.reproduceAsexual(env);
+        }
+
+        return null;
+      }
     }
 
     // 1. Evaluate steering AI
@@ -854,8 +992,7 @@ export class Creature {
 
     if (this.energy <= 0) {
       this.energy = 0;
-      this.isAlive = false;
-      this.causeOfDeath = 'starvation';
+      this.die('starvation');
       return null;
     }
 
@@ -890,46 +1027,82 @@ export class Creature {
       }
     }
 
-    // 6. Predation: Carnivore Attacks Prey
-    const wantsHunt = this.state === 'hunting' || (this.brainType === 'neural' && (this.lastNeuralOutputs?.[3] ?? 0) > 0.45 && this.genome.diet >= 0.42);
-    if (wantsHunt && this.currentTarget && this.currentTarget.isAlive) {
-      const prey = this.currentTarget;
-      const dSq = this.position.distSq(prey.position);
-      const attackRange = this.radius + prey.radius * 0.8;
-
-      if (dSq <= attackRange * attackRange) {
-        // Prey armor mitigates predator yield
-        const preyArmor = prey.genome.armor ?? 0.2;
-        const armorMultiplier = clamp(1.0 - preyArmor * 0.50, 0.40, 1.0);
-
-        // Prey retaliation check: brave/large prey inflicts counter-damage on attacker
-        const preyDefense = prey.genome.size * (prey.genome.bravery ?? 0.5);
-        const predatorAttack = this.genome.size * (this.genome.bravery ?? 0.5);
-        if (preyDefense > predatorAttack * 0.75) {
-          const retaliation = clamp((preyDefense / predatorAttack) * 16, 4, 30);
-          this.energy -= retaliation;
-          if (env && env.addFloatingText) {
-            env.addFloatingText(this.position.x, this.position.y - 12, 'DEFENDED!', '#f59e0b');
+    // 5.5 Parasite Latching & Cleaner Mutualism on Contact
+    if (!this.hostCreature && this.isParasite && env && env.creatureGrid) {
+      const nearbyHosts = env.creatureGrid.queryRadius(this.position.x, this.position.y, this.radius + 30, (c) => {
+        return c !== this && c.isAlive && (c.genome?.size ?? 0) > this.genome.size * 1.35;
+      });
+      for (const host of nearbyHosts) {
+        const dist = this.position.dist(host.position);
+        if (dist <= this.radius + host.radius + 3) {
+          if (this.attachToHost(host)) {
+            this.currentTarget = null;
+            this.state = 'latched';
+            break;
           }
         }
+      }
+    }
 
-        // Successful hunt! Kill prey
-        prey.isAlive = false;
-        prey.causeOfDeath = 'predation';
-        this.kills++;
-
-        // Drop danger pheromone
-        if (env && env.addPheromone) {
-          env.addPheromone(prey.position.x, prey.position.y, 'danger', 1.0, 5.0);
+    if (this.isCleaner && env && env.creatureGrid) {
+      const infestedNearby = env.creatureGrid.queryRadius(this.position.x, this.position.y, this.radius + 40, (c) => {
+        return c !== this && c.isAlive && c.attachedParasites && c.attachedParasites.length > 0;
+      });
+      for (const host of infestedNearby) {
+        const dist = this.position.dist(host.position);
+        if (dist <= this.radius + host.radius + 6) {
+          if (host.attachedParasites && host.attachedParasites.length > 0) {
+            this.groomParasite(host.attachedParasites[0]);
+            break;
+          }
         }
+      }
+    }
 
-        // Carnivore consumes meat proportional to prey mass & remaining energy
-        const preyYield = Math.min(prey.maxEnergy * 0.75, (prey.energy + prey.genome.size * 10) * armorMultiplier);
-        this.energy = Math.min(this.maxEnergy, this.energy + preyYield);
+    // 6. Predation: Carnivore Attacks Prey
+    const wantsHunt = !this.hostCreature && (this.state === 'hunting' || (this.brainType === 'neural' && (this.lastNeuralOutputs?.[3] ?? 0) > 0.45 && this.genome.diet >= 0.42));
+    if (wantsHunt && this.currentTarget && this.currentTarget !== this.hostCreature && this.currentTarget.isAlive) {
+      const prey = this.currentTarget;
+      const isStarving = this.energy < this.maxEnergy * 0.25;
+      if ((prey.genome?.symbiosis ?? 0) >= 0.6 && !isStarving) {
+        this.currentTarget = null;
+      } else {
+        const dSq = this.position.distSq(prey.position);
+        const attackRange = this.radius + prey.radius * 0.8;
 
-        // Drop remaining flesh as meat pellet for scavengers
-        if (env && env.foodManager) {
-          env.foodManager.spawnMeat(prey.position, preyYield * 0.4, prey.genome.size);
+        if (dSq <= attackRange * attackRange) {
+          // Prey armor mitigates predator yield
+          const preyArmor = prey.genome.armor ?? 0.2;
+          const armorMultiplier = clamp(1.0 - preyArmor * 0.50, 0.40, 1.0);
+
+          // Prey retaliation check: brave/large prey inflicts counter-damage on attacker
+          const preyDefense = prey.genome.size * (prey.genome.bravery ?? 0.5);
+          const predatorAttack = this.genome.size * (this.genome.bravery ?? 0.5);
+          if (preyDefense > predatorAttack * 0.75) {
+            const retaliation = clamp((preyDefense / predatorAttack) * 16, 4, 30);
+            this.energy -= retaliation;
+            if (env && env.addFloatingText) {
+              env.addFloatingText(this.position.x, this.position.y - 12, 'DEFENDED!', '#f59e0b');
+            }
+          }
+
+          // Successful hunt! Kill prey
+          prey.die('predation');
+          this.kills++;
+
+          // Drop danger pheromone
+          if (env && env.addPheromone) {
+            env.addPheromone(prey.position.x, prey.position.y, 'danger', 1.0, 5.0);
+          }
+
+          // Carnivore consumes meat proportional to prey mass & remaining energy
+          const preyYield = Math.min(prey.maxEnergy * 0.75, (prey.energy + prey.genome.size * 10) * armorMultiplier);
+          this.energy = Math.min(this.maxEnergy, this.energy + preyYield);
+
+          // Drop remaining flesh as meat pellet for scavengers
+          if (env && env.foodManager) {
+            env.foodManager.spawnMeat(prey.position, preyYield * 0.4, prey.genome.size);
+          }
         }
       }
     }
@@ -1118,6 +1291,43 @@ export class Creature {
     ctx.lineWidth = Math.max(1.5, r * 0.16);
     ctx.strokeStyle = isSelected ? '#38bdf8' : colorInfo.strokeCss;
     ctx.stroke();
+
+    // Host distress indicators when parasites are attached
+    if (this.attachedParasites && this.attachedParasites.length > 0) {
+      ctx.save();
+      const dotCount = Math.min(8, this.attachedParasites.length * 3);
+      const orbitR = r + 6 + Math.sin(this.age * 8.0) * 2;
+      ctx.fillStyle = '#ef4444';
+      for (let i = 0; i < dotCount; i++) {
+        const dotAngle = (i / dotCount) * Math.PI * 2 + this.age * 3.0;
+        const dx = Math.cos(dotAngle) * orbitR;
+        const dy = Math.sin(dotAngle) * orbitR;
+        ctx.beginPath();
+        ctx.arc(dx, dy, Math.max(1.5, r * 0.12), 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+
+    // Parasite latching tendrils / gripping claws
+    if (this.hostCreature) {
+      ctx.save();
+      ctx.strokeStyle = '#ef4444';
+      ctx.fillStyle = '#b91c1c';
+      ctx.lineWidth = Math.max(1.2, r * 0.22);
+      ctx.lineCap = 'round';
+      for (const side of [-1, 1]) {
+        ctx.beginPath();
+        ctx.moveTo(r * 0.6, side * r * 0.35);
+        ctx.quadraticCurveTo(r * 1.3, side * r * 0.65, r * 1.5, side * r * 0.15);
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.arc(r * 1.5, side * r * 0.15, Math.max(1.2, r * 0.18), 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    }
 
     // Distinctive Aposematic Warning Bands (yellow and black)
     if (this.aposematicWarningLevel > 0.35) {
@@ -1314,10 +1524,101 @@ export class Creature {
   }
 
   /**
+   * Attaches this parasite to a target host organism.
+   * @param {Creature} host Host organism to latch onto
+   * @returns {boolean} Whether attachment succeeded
+   */
+  attachToHost(host) {
+    if (!this.isAlive || this.hostCreature) return false;
+    if (!host || !host.isAlive || host === this) return false;
+    if (this.genome.size >= host.genome.size * 0.80) return false;
+
+    this.hostCreature = host;
+    if (!host.attachedParasites) {
+      host.attachedParasites = [];
+    }
+    if (!host.attachedParasites.includes(this)) {
+      host.attachedParasites.push(this);
+    }
+    this.parasiteOffsetAngle = Math.random() * Math.PI * 2;
+    return true;
+  }
+
+  /**
+   * Detaches this creature from its currently attached host organism.
+   */
+  detachFromHost() {
+    if (this.hostCreature) {
+      if (this.hostCreature.attachedParasites) {
+        const idx = this.hostCreature.attachedParasites.indexOf(this);
+        if (idx !== -1) {
+          this.hostCreature.attachedParasites.splice(idx, 1);
+        }
+      }
+      this.hostCreature = null;
+    }
+  }
+
+  /**
+   * Detaches all parasites currently attached to this host organism.
+   */
+  detachAllParasites() {
+    if (this.attachedParasites && this.attachedParasites.length > 0) {
+      const list = [...this.attachedParasites];
+      for (let i = 0; i < list.length; i++) {
+        list[i].detachFromHost();
+      }
+    }
+  }
+
+  /**
+   * Cleaner mutualist grooms a parasite off a host creature.
+   * @param {Creature} parasite Latched parasite to groom off
+   * @returns {number} Energy gained by the cleaner
+   */
+  groomParasite(parasite) {
+    if (!parasite || !parasite.hostCreature || !this.isAlive) return 0;
+    parasite.detachFromHost();
+    const gained = Math.min(25, parasite.energy * 0.6 + 5);
+    this.energy = Math.min(this.maxEnergy, this.energy + gained);
+    parasite.energy = Math.max(0, parasite.energy - gained);
+    if (parasite.energy <= 0) {
+      parasite.die('predation');
+    } else {
+      const repel = Vector2D.sub(parasite.position, this.position).normalize();
+      if (repel.magSq() < 0.001) {
+        repel.set(Math.cos(this.heading), Math.sin(this.heading));
+      }
+      parasite.velocity.add(repel.mult(this.genome.speed * 0.8));
+    }
+    return gained;
+  }
+
+  /**
+   * Handles organism demise, cleanly detaching all symbiotic links.
+   * @param {string} [cause='natural'] Cause of death
+   */
+  die(cause = 'natural') {
+    if (!this.isAlive) return;
+    this.isAlive = false;
+    this.causeOfDeath = cause;
+    this.onDeath();
+  }
+
+  /**
+   * Cleans up symbiotic attachments when this organism ceases living.
+   */
+  onDeath() {
+    if (this.hostCreature) {
+      this.detachFromHost();
+    }
+    this.detachAllParasites();
+  }
+
+  /**
    * God-mode: Instantly kills creature.
    */
   kill() {
-    this.isAlive = false;
-    this.causeOfDeath = 'smite';
+    this.die('smite');
   }
 }

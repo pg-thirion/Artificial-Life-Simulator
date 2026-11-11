@@ -754,8 +754,12 @@ export class World {
 
       if (damageFactor > 0.45) {
         // Direct incineration / lethal blast
-        c.isAlive = false;
-        c.causeOfDeath = 'disaster';
+        if (typeof c.die === 'function') {
+          c.die('disaster');
+        } else {
+          c.isAlive = false;
+          c.causeOfDeath = 'disaster';
+        }
         casualties++;
         // Drop charred meat
         this.foodManager.spawnMeat(c.position, c.genome.size * 5, c.genome.size);
@@ -811,8 +815,12 @@ export class World {
       if (roll < virulence) {
         c.energy *= 0.35;
         if (roll < virulence * 0.6) {
-          c.isAlive = false;
-          c.causeOfDeath = 'epidemic';
+          if (typeof c.die === 'function') {
+            c.die('epidemic');
+          } else {
+            c.isAlive = false;
+            c.causeOfDeath = 'epidemic';
+          }
           victims++;
           this.foodManager.spawnMeat(c.position, c.genome.size * 6, c.genome.size);
         }
@@ -1012,6 +1020,9 @@ export class World {
       }
 
       if (!c.isAlive) {
+        if (typeof c.onDeath === 'function') {
+          c.onDeath();
+        }
         this.creatureGrid.remove(c);
         // Spawn decaying carcass if died naturally or of famine
         if (c.causeOfDeath !== 'predation' && c.causeOfDeath !== 'disaster') {

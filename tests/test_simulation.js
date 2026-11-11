@@ -665,6 +665,206 @@ assert(!mockCtxB.strokeStyles.includes('#facc15'), 'Non-aposematic creature does
 assert(!mockCtxB.strokeStyles.includes('#09090b'), 'Non-aposematic creature does not render black warning band');
 assert(mockCtxB.fillStyles.includes(nonAposematicCreature.genome.color.bodyCss), 'Body fill uses genome color bodyCss when chromatophore <= 0.05');
 
+console.log('--- Testing Task 5: Symbiosis Mutualism & Parasitic Leeches ---');
+
+// 1. Parasite Properties Initialization & Attachment Validation
+const hostA = new Creature(300, 300, new Genome({ size: 16, brainType: 'heuristic' }), 100);
+const parasiteA = new Creature(300, 300, new Genome({ size: 5, symbiosis: 0.1, diet: 0.8, brainType: 'heuristic' }), 30);
+
+assert(Array.isArray(hostA.attachedParasites), 'Host initializes attachedParasites array');
+assert(hostA.attachedParasites.length === 0, 'Host initially has 0 attached parasites');
+assert(parasiteA.hostCreature === null, 'Parasite initially has null hostCreature');
+assert(parasiteA.parasiteOffsetAngle === 0, 'Parasite initially has 0 offset angle');
+assert(parasiteA.isParasite === true, 'isParasite returns true for symbiosis < 0.25, diet > 0.45, size < 7.0');
+
+// Valid attachment
+const attachSuccess = parasiteA.attachToHost(hostA);
+assert(attachSuccess === true, 'attachToHost returns true for valid host');
+assert(parasiteA.hostCreature === hostA, 'parasite.hostCreature points to host');
+assert(hostA.attachedParasites.includes(parasiteA), 'host.attachedParasites includes parasite');
+assert(parasiteA.parasiteOffsetAngle >= 0 && parasiteA.parasiteOffsetAngle <= Math.PI * 2, 'parasiteOffsetAngle assigned in [0, 2PI]');
+
+// Cannot attach again if already attached
+const hostB = new Creature(350, 350, new Genome({ size: 16 }), 100);
+assert(parasiteA.attachToHost(hostB) === false, 'Cannot attach if already attached to a host');
+
+// Cannot attach to self
+assert(hostA.attachToHost(hostA) === false, 'Creature cannot attach to itself');
+
+// Cannot attach to null or dead host
+const deadHost = new Creature(300, 300, new Genome({ size: 16 }), 100);
+deadHost.isAlive = false;
+const parasiteB = new Creature(300, 300, new Genome({ size: 5 }), 30);
+assert(parasiteB.attachToHost(null) === false, 'Cannot attach to null host');
+assert(parasiteB.attachToHost(deadHost) === false, 'Cannot attach to dead host');
+
+// Dead creature cannot attach
+const deadParasite = new Creature(300, 300, new Genome({ size: 5 }), 30);
+deadParasite.isAlive = false;
+assert(deadParasite.attachToHost(hostB) === false, 'Dead creature cannot attach to host');
+
+// Cannot attach if parasite is too large (size >= host.size * 0.80)
+const largeCreature = new Creature(300, 300, new Genome({ size: 14 }), 50);
+assert(largeCreature.attachToHost(hostB) === false, 'Cannot attach if size >= 0.80 of host size');
+
+// 2. Position Synchronization with Host Movement
+const syncHost = new Creature(200, 200, new Genome({ size: 12 }), 100);
+syncHost.heading = 0;
+syncHost.velocity.set(3, 4);
+
+const syncParasite = new Creature(200, 200, new Genome({ size: 4 }), 40);
+syncParasite.attachToHost(syncHost);
+syncParasite.parasiteOffsetAngle = 0; // Fix angle for deterministic verification
+
+syncParasite.update(0.1, null);
+
+const expectedRadius = syncHost.radius + syncParasite.radius * 0.5;
+assertApprox(syncParasite.position.x, syncHost.position.x + expectedRadius, 1e-4, 'Parasite x synchronized to host position and offset');
+assertApprox(syncParasite.position.y, syncHost.position.y, 1e-4, 'Parasite y synchronized to host position and offset');
+assertApprox(syncParasite.velocity.x, 3, 1e-4, 'Parasite velocity.x synchronized to host');
+assertApprox(syncParasite.velocity.y, 4, 1e-4, 'Parasite velocity.y synchronized to host');
+
+// 3. Energy Drain and Siphon Transfer over update()
+const drainHost = new Creature(400, 400, new Genome({ size: 16 }), 100);
+const drainParasite = new Creature(400, 400, new Genome({ size: 5, symbiosis: 0.1, diet: 0.8 }), 20);
+drainParasite.attachToHost(drainHost);
+
+const hostInitialEnergy = drainHost.energy;
+const parasiteInitialEnergy = drainParasite.energy;
+const dtStep = 0.5;
+
+// Run 1 frame
+drainParasite.update(dtStep, null);
+assertApprox(drainHost.energy, hostInitialEnergy - 2.0 * dtStep, 1e-4, 'Host energy drained by 2.0 * dt in single update');
+assert(drainParasite.energy > parasiteInitialEnergy, 'Parasite gained net energy from siphoning');
+
+// Run 9 more frames (total 10 frames = 5 seconds)
+for (let i = 0; i < 9; i++) {
+  drainParasite.update(dtStep, null);
+}
+assertApprox(drainHost.energy, hostInitialEnergy - 10.0, 1e-3, 'Host energy accurately reduced by 10.0 over 5.0s of latching');
+assert(drainParasite.energy > parasiteInitialEnergy + 5.0, 'Parasite accumulated significant siphoned energy');
+
+// 4. Detach stops energy drain
+const energyBeforeDetachHost = drainHost.energy;
+drainParasite.detachFromHost();
+assert(drainParasite.hostCreature === null, 'detachFromHost clears hostCreature');
+assert(!drainHost.attachedParasites.includes(drainParasite), 'Host attachedParasites no longer contains detached parasite');
+
+drainParasite.update(dtStep, null);
+assertApprox(drainHost.energy, energyBeforeDetachHost, 1e-4, 'Host energy unchanged after parasite detachment');
+
+// 5. Host Death Detaches All Parasites Safely
+const dyingHost = new Creature(500, 500, new Genome({ size: 18 }), 50);
+const p1 = new Creature(500, 500, new Genome({ size: 4 }), 30);
+const p2 = new Creature(500, 500, new Genome({ size: 5 }), 30);
+p1.attachToHost(dyingHost);
+p2.attachToHost(dyingHost);
+assert(dyingHost.attachedParasites.length === 2, 'Host has 2 attached parasites');
+
+dyingHost.die('starvation');
+assert(!dyingHost.isAlive, 'Host is deceased');
+assert(dyingHost.attachedParasites.length === 0, 'Host death clears all attachedParasites');
+assert(p1.hostCreature === null, 'p1 detached on host demise');
+assert(p2.hostCreature === null, 'p2 detached on host demise');
+
+// Parasite death detaches from host
+const hostC = new Creature(500, 500, new Genome({ size: 18 }), 80);
+const p3 = new Creature(500, 500, new Genome({ size: 4 }), 20);
+p3.attachToHost(hostC);
+assert(hostC.attachedParasites.includes(p3), 'p3 attached to hostC');
+p3.die('predation');
+assert(p3.hostCreature === null, 'Dying parasite detaches from host');
+assert(!hostC.attachedParasites.includes(p3), 'Host removes dead parasite from attachedParasites');
+
+// 6. Cleaner Mutualism Grooms Parasite off Host
+const mutualistHost = new Creature(600, 600, new Genome({ size: 18 }), 90);
+const victimParasite = new Creature(600, 600, new Genome({ size: 4, symbiosis: 0.1, diet: 0.8 }), 20);
+victimParasite.attachToHost(mutualistHost);
+
+const cleaner = new Creature(600, 600, new Genome({ size: 7, symbiosis: 0.85, diet: 0.2 }), 40);
+assert(cleaner.isCleaner === true, 'isCleaner returns true for symbiosis >= 0.6');
+
+const cleanerInitialEnergy = cleaner.energy;
+const gainedEnergy = cleaner.groomParasite(victimParasite);
+const expectedGain = Math.min(25, 20 * 0.6 + 5); // 17
+
+assertApprox(gainedEnergy, expectedGain, 1e-4, 'groomParasite returns exact energy reward');
+assertApprox(cleaner.energy, cleanerInitialEnergy + expectedGain, 1e-4, 'Cleaner gains energy from grooming');
+assert(victimParasite.hostCreature === null, 'Groomed parasite detached from host');
+assert(!mutualistHost.attachedParasites.includes(victimParasite), 'Host attachedParasites cleared of groomed parasite');
+assertApprox(victimParasite.energy, 20 - expectedGain, 1e-4, 'Parasite energy reduced by grooming damage');
+
+// Grooming non-attached parasite returns 0
+assert(cleaner.groomParasite(victimParasite) === 0, 'Grooming unattached parasite returns 0');
+
+// 7. Predator Immunity for Cleaners
+const predator = new Creature(100, 100, new Genome({ size: 16, diet: 0.9, sense: 120, brainType: 'neural' }), 200);
+const cleanerPrey = new Creature(130, 100, new Genome({ size: 6, diet: 0.1, symbiosis: 0.8, brainType: 'heuristic' }), 40);
+const standardPrey = new Creature(130, 100, new Genome({ size: 6, diet: 0.1, symbiosis: 0.2, brainType: 'heuristic' }), 40);
+
+const cleanerPredGrid = new SpatialGrid(64, 1000, 1000);
+cleanerPredGrid.insert(predator);
+cleanerPredGrid.insert(cleanerPrey);
+
+// Well-fed predator (energy 200 > maxEnergy * 0.25 = 104) ignores cleaner
+predator.evaluateNeuralBehavior({ creatureGrid: cleanerPredGrid, worldWidth: 1000, worldHeight: 1000 });
+assert(predator.currentTarget !== cleanerPrey, 'Well-fed neural predator does not target cleaner prey');
+
+predator.brainType = 'heuristic';
+predator.evaluateBehavior({ creatureGrid: cleanerPredGrid, worldWidth: 1000, worldHeight: 1000 });
+assert(predator.currentTarget !== cleanerPrey, 'Well-fed heuristic predator does not target cleaner prey');
+
+// Starving predator (energy = 10 < maxEnergy * 0.25) DOES target cleaner
+predator.energy = 10;
+predator.evaluateBehavior({ creatureGrid: cleanerPredGrid, worldWidth: 1000, worldHeight: 1000 });
+assert(predator.currentTarget === cleanerPrey, 'Starving heuristic predator targets cleaner prey');
+
+predator.brainType = 'neural';
+predator.evaluateNeuralBehavior({ creatureGrid: cleanerPredGrid, worldWidth: 1000, worldHeight: 1000 });
+assert(predator.currentTarget === cleanerPrey, 'Starving neural predator targets cleaner prey');
+
+// 8. Contact Latching in update()
+const contactGrid = new SpatialGrid(64, 1000, 1000);
+const wildHost = new Creature(200, 200, new Genome({ size: 15, diet: 0.2 }), 80);
+const huntingParasite = new Creature(205, 200, new Genome({ size: 5, symbiosis: 0.1, diet: 0.8 }), 40);
+contactGrid.insert(wildHost);
+contactGrid.insert(huntingParasite);
+
+huntingParasite.update(0.1, { creatureGrid: contactGrid, worldWidth: 1000, worldHeight: 1000 });
+assert(huntingParasite.hostCreature === wildHost, 'Unattached parasite latches onto host on contact in update()');
+assert(wildHost.attachedParasites.includes(huntingParasite), 'Host records latching parasite on contact');
+
+// 9. Contact Grooming in update()
+const groomingGrid = new SpatialGrid(64, 1000, 1000);
+const infestedHost = new Creature(300, 300, new Genome({ size: 16 }), 80);
+const attachedLeech = new Creature(300, 300, new Genome({ size: 4, symbiosis: 0.1, diet: 0.8 }), 20);
+attachedLeech.attachToHost(infestedHost);
+
+const patrollingCleaner = new Creature(308, 300, new Genome({ size: 7, symbiosis: 0.85, diet: 0.2 }), 40);
+groomingGrid.insert(infestedHost);
+groomingGrid.insert(attachedLeech);
+groomingGrid.insert(patrollingCleaner);
+
+patrollingCleaner.update(0.1, { creatureGrid: groomingGrid, worldWidth: 1000, worldHeight: 1000 });
+assert(infestedHost.attachedParasites.length === 0, 'Cleaner automatically grooms host on contact in update()');
+assert(attachedLeech.hostCreature === null, 'Leech detached through automated contact grooming');
+
+// 10. Canvas Draw Visuals for Parasite Tendrils & Host Distress
+const drawHost = new Creature(100, 100, new Genome({ size: 15 }));
+const drawParasite = new Creature(100, 100, new Genome({ size: 5 }));
+drawParasite.attachToHost(drawHost);
+
+const hostCtx = createMockContext();
+drawHost.draw(hostCtx);
+assert(hostCtx.fillStyles.includes('#ef4444'), 'Host with attached parasites renders red #ef4444 distress dots');
+
+const parasiteCtx = createMockContext();
+drawParasite.draw(parasiteCtx);
+assert(parasiteCtx.strokeStyles.includes('#ef4444'), 'Latched parasite renders #ef4444 gripping tendrils/claws');
+assert(parasiteCtx.fillStyles.includes('#b91c1c'), 'Latched parasite renders #b91c1c gripping claws');
+
+
 console.log('--- Testing Piece 2: Creature Physics, Metabolism & AI ---');
 
 const creature = new Creature(500, 500, herbGenome, 100);
