@@ -12,6 +12,7 @@ import { Creature } from '../src/creature.js';
 import { Colony } from '../src/colony.js';
 import { NeuralBrain, BRAIN_CONFIG } from '../src/neuralBrain.js';
 import { NeuralVisualizer, INPUT_LABELS, OUTPUT_LABELS } from '../src/neuralVisualizer.js';
+import { ArenaTournament } from '../src/arena.js';
 
 let passed = 0;
 let failed = 0;
@@ -1726,6 +1727,134 @@ import('../src/world.js').then(async ({ World }) => {
   for (const outLabel of OUTPUT_LABELS) {
     assert(neuralMockCanvas.ctx.texts.some(t => t.startsWith(outLabel)), `NeuralVisualizer rendered output label "${outLabel}" with numeric readout`);
   }
+
+  console.log('--- Testing Task 8: Species Arena Battle Royale Tournament Mode ---');
+
+  // 1. Arena Initialization & Default Configuration
+  const arenaWorld = new World({
+    width: 2800,
+    height: 1800,
+    initialHerbivores: 20,
+    initialCarnivores: 8,
+    initialOmnivores: 6,
+    maxFood: 180
+  });
+  arenaWorld.time = 42.5;
+  arenaWorld.temperature = 26.0;
+  arenaWorld.climateState = 'heatwave';
+
+  const arena = new ArenaTournament(arenaWorld);
+  assert(arena.world === arenaWorld, 'ArenaTournament references world instance');
+  assertApprox(arena.centerX, 1400, 1e-4, 'Arena centerX defaults to world.width / 2 (1400)');
+  assertApprox(arena.centerY, 900, 1e-4, 'Arena centerY defaults to world.height / 2 (900)');
+  assert(arena.initialRadius === 1200, 'Arena initialRadius defaults to 1200');
+  assert(arena.minRadius === 80, 'Arena minRadius defaults to 80');
+  assert(arena.duration === 90, 'Arena duration defaults to 90s');
+  assert(arena.radiationDamagePerSec === 25, 'Arena radiationDamagePerSec defaults to 25');
+  assert(arena.isActive === false && arena.isComplete === false, 'Arena starts inactive and incomplete');
+
+  // 2. Sandbox Snapshot & Tournament Start
+  const preArenaCreatureCount = arenaWorld.creatures.length;
+  const preArenaFirstCreature = arenaWorld.creatures[0];
+  const preArenaFoodCount = arenaWorld.foodManager.foodList.length;
+  const preArenaTime = arenaWorld.time;
+  const preArenaTemp = arenaWorld.temperature;
+  const preArenaClimate = arenaWorld.climateState;
+  const preArenaSpeciesSize = arenaWorld.speciesRegistry.size;
+
+  arena.start();
+  assert(arena.isActive === true, 'arena.start() activates tournament');
+  assert(arena.isComplete === false, 'arena.start() sets isComplete to false');
+  assert(arena.winner === null, 'arena.start() resets winner to null');
+  assert(arena.worldSnapshot !== null, 'arena.start() snapshots original sandbox state');
+  assert(arena.competingClades.length === 4, `Arena spawns 4 competing clades (got ${arena.competingClades.length})`);
+  assert(arenaWorld.creatures.length === 40, `Arena spawns 40 total combatants (4 clades x 10, got ${arenaWorld.creatures.length})`);
+
+  // Verify symmetric ring sector placement within initialRadius * 0.55 + jitter
+  let allInsideInitialStorm = true;
+  for (const c of arenaWorld.creatures) {
+    const distFromCenter = Math.hypot(c.position.x - arena.centerX, c.position.y - arena.centerY);
+    if (distFromCenter > arena.initialRadius) {
+      allInsideInitialStorm = false;
+    }
+  }
+  assert(allInsideInitialStorm, 'All arena combatants spawn safely inside initial storm ring');
+
+  // 3. Storm Ring Contraction (1200 -> 80 over 90s)
+  // Prevent victory during contraction test by keeping all creatures alive inside center
+  for (const c of arenaWorld.creatures) {
+    c.position.set(arena.centerX, arena.centerY);
+    c.energy = 500;
+  }
+
+  arena.update(45); // 50% duration (45s / 90s)
+  // Expected midpoint radius: 1200 - (1200 - 80) * 0.5 = 1200 - 560 = 640
+  assertApprox(arena.stormRadius, 640, 1e-3, 'Storm radius contracts linearly to 640px at t=45s (50%)');
+
+  arena.update(45); // 100% duration (90s / 90s)
+  assertApprox(arena.stormRadius, 80, 1e-3, 'Storm radius reaches minRadius 80px at t=90s (100%)');
+
+  arena.update(20); // Beyond 90s clamps at minRadius 80
+  assertApprox(arena.stormRadius, 80, 1e-3, 'Storm radius clamps at minRadius 80px after duration');
+
+  // 4. Out-of-Bounds Radiation Damage (25 cal/s) & Elimination
+  const testVictim = arenaWorld.creatures[0];
+  const safeFighter = arenaWorld.creatures[1];
+  // Place testVictim outside storm ring (stormRadius is 80, place at distance 300)
+  testVictim.position.set(arena.centerX + 300, arena.centerY);
+  testVictim.energy = 40;
+  // Place safeFighter at center (distance 0 <= 80)
+  safeFighter.position.set(arena.centerX, arena.centerY);
+  safeFighter.energy = 100;
+
+  arena.update(1.0); // 1 second of 25 cal/s radiation
+  assertApprox(testVictim.energy, 15, 1e-3, 'Creature outside storm ring takes 25 cal/s radiation damage (40 -> 15)');
+  assert(testVictim.isAlive === true, 'Creature with remaining energy survives radiation tick');
+  assertApprox(safeFighter.energy, 100, 1e-3, 'Creature inside storm ring takes 0 radiation damage');
+
+  arena.update(1.0); // Second tick: 15 - 25 = -10 <= 0 -> lethal radiation death
+  assert(testVictim.isAlive === false, 'Creature outside storm ring dies when radiation depletes energy <= 0');
+  assert(testVictim.causeOfDeath === 'disaster', 'Radiation elimination sets causeOfDeath to disaster');
+
+  // 5. Clade Survival Leaderboard & Champion Detection
+  const championCladeId = arena.competingClades[0].speciesId;
+  for (const c of arenaWorld.creatures) {
+    if (c.genome.speciesId === championCladeId) {
+      c.isAlive = true;
+      c.energy = 150;
+      c.kills = 2;
+      c.position.set(arena.centerX, arena.centerY);
+    } else {
+      c.die('predation');
+    }
+  }
+
+  const finalState = arena.update(0.5);
+  assert(finalState.isComplete === true && arena.isComplete === true, 'Tournament completes when only 1 surviving clade remains');
+  assert(finalState.winner !== null && finalState.winner.speciesId === championCladeId, `Last surviving clade crowned champion (${championCladeId})`);
+  assert(finalState.leaderboard[0].speciesId === championCladeId, 'Champion clade ranked #1 on leaderboard');
+  assert(finalState.leaderboard[0].aliveCount > 0, 'Champion clade has positive aliveCount');
+  assert(finalState.leaderboard[0].kills > 0, 'Champion clade tracks aggregate kills');
+
+  // 6. Canvas Rendering of Storm Ring
+  const arenaMockCtx = createMockContext();
+  arena.draw(arenaMockCtx);
+  assert(arenaMockCtx.strokeStyles.includes('#f43f5e'), 'arena.draw(ctx) renders primary #f43f5e storm border');
+  assert(arenaMockCtx.strokeStyles.includes('#c084fc'), 'arena.draw(ctx) renders secondary #c084fc electrical ring');
+
+  // 7. World State Restoration via stop()
+  arena.stop();
+  assert(arena.isActive === false, 'arena.stop() deactivates arena mode');
+  assert(arena.isComplete === false, 'arena.stop() resets isComplete');
+  assert(arena.winner === null, 'arena.stop() clears winner');
+  assert(arena.worldSnapshot === null, 'arena.stop() clears snapshot after restoring');
+  assert(arenaWorld.creatures.length === preArenaCreatureCount, `Restored exact sandbox creature count (${arenaWorld.creatures.length} === ${preArenaCreatureCount})`);
+  assert(arenaWorld.creatures[0] === preArenaFirstCreature, 'Restored exact sandbox creature instances');
+  assert(arenaWorld.foodManager.foodList.length === preArenaFoodCount, `Restored exact sandbox food count (${arenaWorld.foodManager.foodList.length} === ${preArenaFoodCount})`);
+  assertApprox(arenaWorld.time, preArenaTime, 1e-4, 'Restored exact sandbox simulation time');
+  assertApprox(arenaWorld.temperature, preArenaTemp, 1e-4, 'Restored exact sandbox temperature');
+  assert(arenaWorld.climateState === preArenaClimate, 'Restored exact sandbox climateState');
+  assert(arenaWorld.speciesRegistry.size === preArenaSpeciesSize, 'Restored exact sandbox speciesRegistry');
 
   console.log(`\nResults: ${passed} passed, ${failed} failed.`);
   if (failed > 0) {

@@ -24,6 +24,7 @@ const moduleFiles = [
   'src/creature.js',
   'src/colony.js',
   'src/world.js',
+  'src/arena.js',
   'src/charts.js',
   'src/audio.js'
 ];
